@@ -4,9 +4,9 @@ import sys
 import time
 
 # Variáveis
-SCOPEID = 8 # scopeID in the end of the line where IPv6 address is
+SCOPEID = 8 # scopeID in the end of the line where IPv6 address is (what defines the interface)
 PORT = 5005
-NODEID = 1
+NODEID = 2
 MESSAGEID = 1
 
 
