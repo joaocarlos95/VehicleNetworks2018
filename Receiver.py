@@ -41,7 +41,7 @@ def mainFunction():
 		timeOfPosition = datetime.datetime.fromtimestamp(timeOfPosition).strftime('%H:%M:%S')
 
 		updateTable(nodeID, messageID, position, timeOfPosition, 0)
-		#printTable()
+		printTable()
 
 
 
@@ -126,10 +126,10 @@ def updateTimerThread():
 		for entry in table:
 			if entry[4] == 20:
 				table.remove(table[index])
+				printTable()
 			else:
 				table[index][4] += 1
 			index += 1
-		#printTable()
 		time.sleep(1)
 
 
