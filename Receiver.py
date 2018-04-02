@@ -9,6 +9,7 @@ import _thread
 SCOPEID = 8 # scopeID in the end of the line where IPv6 address is
 PORT = 5005
 GROUP = 'ff02::0'
+TIMOUT = 20
 
 table = []
 #tableThread = []
@@ -124,7 +125,7 @@ def updateTimerThread():
 	while len(table) != 0:
 		index = 0
 		for entry in table:
-			if entry[4] == 20:
+			if entry[4] == TIMOUT:
 				table.remove(table[index])
 				printTable()
 			else:

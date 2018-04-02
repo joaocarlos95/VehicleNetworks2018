@@ -3,6 +3,7 @@ import socket
 import sys
 import time
 import hashlib
+import _thread
 from uuid import getnode as get_mac
 
 # Variáveis
@@ -12,6 +13,7 @@ NODEID = 0
 MESSAGEID = 1
 COORDINATES = None
 COORDINATES_INDEX = 0
+EXIT = None
 
 # Função para enviar uma mensagem para qualquer nó da rede
 def sendFunction():
@@ -55,16 +57,36 @@ def getCoordinates():
 	return "(" + latitude + "," + longitude + ")|" + timestamp
 
 
+def exitProgram():
+
+	global EXIT
+
+	EXIT = input("\nIf you want to exit, press Enter\n")
+
+
+
 if __name__ == "__main__":
 
-	with open("./Coordinates/Coordinate1.txt") as fileCoordinates:
-		COORDINATES = fileCoordinates.readlines()
-		COORDINATES_INDEX = len(COORDINATES) - 1
-
 	while True:
-		exit = input("Exit? Y or N: ")
-		if exit == "Y":
+	
+		number = input("Choose a number for coordinate file (between 1 and 5) or 0 to exit: ")
+		
+		if number == "0":
 			sys.exit()
-		else:
-			sendFunction()
+
+		try:
+		    fileCoordinates = open("./Coordinates/Coordinate" + number + ".txt")
+		    break
+
+		except (OSError, IOError) as e:
+			print("\nYou must choose a number between 1 and 5")
+
+	_thread.start_new_thread(exitProgram,())
+
+	COORDINATES = fileCoordinates.readlines()
+	COORDINATES_INDEX = len(COORDINATES) - 1
+
+	while EXIT is None:
+		sendFunction()
+		time.sleep(3)
 
