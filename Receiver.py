@@ -35,14 +35,34 @@ def mainFunction():
 
 		message = message.decode().split("|")
 
+		print("\nMessage Received from " + str(payload[0].split("%")[0]))
+		print("Message: " + str(message))
+
 		nodeID = message[0]
 		messageID = message[1]
 		position = message[2]
 		timeOfPosition = int(float(message[3]))
 		timeOfPosition = datetime.datetime.fromtimestamp(timeOfPosition).strftime('%H:%M:%S')
 
-		updateTable(nodeID, messageID, position, timeOfPosition, 0)
-		printTable()
+		if (differentMessageID(nodeID, messageID)):
+			updateTable(nodeID, messageID, position, timeOfPosition, 0)
+			printTable()
+
+
+
+#####################################################################################
+# Função para verificar se a mensagem que recebeu é nova							#
+#####################################################################################
+
+def differentMessageID(nodeID, messageID):
+
+	index = findNode(nodeID)
+
+	print(messageID )
+	if index != None and int(table[index][1]) >= int(messageID):
+		return False
+
+	return True
 
 
 
@@ -78,14 +98,13 @@ def updateTable(nodeID, messageID, position, timeOfPosition, timer):
 def findNode(nodeID):
 
 	global table
-	index = None
 
 	i = 0
 	for entry in table:
 		if entry[0] == nodeID:
-			index = i
+			return i
 		i += 1
-	return index
+	return None
 
 
 
