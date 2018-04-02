@@ -64,7 +64,7 @@ def updateTable(nodeID, messageID, position, timeOfPosition, timer):
 		appendTable(nodeID, messageID, position, timeOfPosition, timer)
 	else:
 		table[i][1] = messageID
-		table[i][2] = "newPosition"
+		table[i][2] = position
 		table[i][3] = timeOfPosition
 		table[i][4] = 0
 

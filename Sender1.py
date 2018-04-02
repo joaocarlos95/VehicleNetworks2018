@@ -6,11 +6,12 @@ import hashlib
 from uuid import getnode as get_mac
 
 # Variáveis
-SCOPEID = 8 # scopeID in the end of the line where IPv6 address is (what defines the interface)
+SCOPEID = 8 # scopeID in the end of the line where IPv6 address is
 PORT = 5005
-NODEID = hex(get_mac()).encode('utf-8')
+NODEID = 0
 MESSAGEID = 1
-
+COORDINATES = None
+COORDINATES_INDEX = 0
 
 # Função para enviar uma mensagem para qualquer nó da rede
 def sendFunction():
@@ -24,13 +25,13 @@ def sendFunction():
 	#message = input("Enter the message to send: ")
 	
 	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(NODEID)
+	hashValue.update(hex(get_mac()).encode('utf-8'))
 	NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
-	
+
 	destinationAddress = "ff02::0"
-	message = str(NODEID) + "|" + str(MESSAGEID) + "|" + getCoordinates() + "|" + getTimeStamp()
+	message = str(NODEID) + "|" + str(MESSAGEID) + "|" + getCoordinates()
 	MESSAGEID += 1
-	
+
 	print("\nSending message [" + message + "] to " + destinationAddress)
 
 	senderSocket.sendto(message.encode(), (destinationAddress, PORT, 0, SCOPEID))
@@ -41,18 +42,24 @@ def sendFunction():
 
 def getCoordinates():
 
+	global COORDINATES_INDEX
 
+	line = COORDINATES[COORDINATES_INDEX].split(" ")
 
-	return "Coordinates"
+	latitude = line[0]
+	longitude = line[1]
+	timestamp = line[3]
 
+	COORDINATES_INDEX -= 1
 
-
-def getTimeStamp():
-	return str(time.time())
-
+	return "(" + latitude + "," + longitude + ")|" + timestamp
 
 
 if __name__ == "__main__":
+
+	with open("./Coordinates/Coordinate2.txt") as fileCoordinates:
+		COORDINATES = fileCoordinates.readlines()
+		COORDINATES_INDEX = len(COORDINATES) - 1
 
 	while True:
 		exit = input("Exit? Y or N: ")
@@ -60,3 +67,4 @@ if __name__ == "__main__":
 			sys.exit()
 		else:
 			sendFunction()
+
