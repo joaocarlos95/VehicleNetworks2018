@@ -107,9 +107,9 @@ def printTable():
 
 	global table
 
+	print("\nTable:")
 	for entry in table:
 		print(entry)
-	print("\n")
 
 
 

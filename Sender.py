@@ -2,11 +2,13 @@
 import socket
 import sys
 import time
+import hashlib
+from uuid import getnode as get_mac
 
 # Variáveis
 SCOPEID = 8 # scopeID in the end of the line where IPv6 address is
 PORT = 5005
-NODEID = 1
+NODEID = hex(get_mac()).encode('utf-8')
 MESSAGEID = 1
 
 
@@ -14,6 +16,7 @@ MESSAGEID = 1
 def sendFunction():
 
 	global MESSAGEID
+	global NODEID
 
 	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
 
@@ -23,7 +26,12 @@ def sendFunction():
 	destinationAddress = "ff02::0"
 	message = str(NODEID) + "|" + str(MESSAGEID) + "|" + getCoordinates() + "|" + getTimeStamp()
 	MESSAGEID += 1
-	
+
+	hashValue = hashlib.blake2s(digest_size=2)
+	hashValue.update(NODEID)
+
+	NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
+
 	print("\nSending message [" + message + "] to " + destinationAddress)
 
 	senderSocket.sendto(message.encode(), (destinationAddress, PORT, 0, SCOPEID))
@@ -50,3 +58,4 @@ if __name__ == "__main__":
 			sys.exit()
 		else:
 			sendFunction()
+
