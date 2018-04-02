@@ -8,7 +8,7 @@ from uuid import getnode as get_mac
 # Variáveis
 SCOPEID = 8 # scopeID in the end of the line where IPv6 address is
 PORT = 5005
-NODEID = hex(get_mac()).encode('utf-8')
+NODEID = 0
 MESSAGEID = 1
 
 
@@ -23,14 +23,13 @@ def sendFunction():
 	#destinationAddress = input("\nEnter destination IP Address: ")
 	#message = input("Enter the message to send: ")
 	
+	hashValue = hashlib.blake2s(digest_size=2)
+	hashValue.update(hex(get_mac()).encode('utf-8'))
+	NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
+
 	destinationAddress = "ff02::0"
 	message = str(NODEID) + "|" + str(MESSAGEID) + "|" + getCoordinates() + "|" + getTimeStamp()
 	MESSAGEID += 1
-
-	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(NODEID)
-
-	NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
 
 	print("\nSending message [" + message + "] to " + destinationAddress)
 

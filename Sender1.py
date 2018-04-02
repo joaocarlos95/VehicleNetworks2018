@@ -23,14 +23,13 @@ def sendFunction():
 	#destinationAddress = input("\nEnter destination IP Address: ")
 	#message = input("Enter the message to send: ")
 	
+	hashValue = hashlib.blake2s(digest_size=2)
+	hashValue.update(NODEID)
+	NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
+	
 	destinationAddress = "ff02::0"
 	message = str(NODEID) + "|" + str(MESSAGEID) + "|" + getCoordinates() + "|" + getTimeStamp()
 	MESSAGEID += 1
-
-	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(NODEID)
-
-	NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
 	
 	print("\nSending message [" + message + "] to " + destinationAddress)
 
@@ -41,6 +40,9 @@ def sendFunction():
 
 
 def getCoordinates():
+
+
+
 	return "Coordinates"
 
 
