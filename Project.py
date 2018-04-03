@@ -6,7 +6,7 @@ import time
 import _thread
 import sys
 import hashlib
-from uuid import getnode as get_mac
+from uuid import getnode
 
 # Variáveis Sender
 SCOPEID = 8 # scopeID in the end of the line where IPv6 address is
@@ -37,7 +37,7 @@ def sendFunction():
 	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
 
 	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(hex(get_mac()).encode('utf-8'))
+	hashValue.update(hex(getnode()).encode('utf-8'))
 	NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
 
 	destinationAddress = "ff02::0"
@@ -252,8 +252,8 @@ if __name__ == "__main__":
 
 	while True:
 
-		number = input("Choose a number for coordinate file (between 1 and 5) or 0 to exit: ")
-		if number == "0":
+		number = input("Choose a number for coordinate file (between 1 and 5) or \"Exit\" to exit the program: ")
+		if number == "Exit":
 			sys.exit()
 
 		try:
