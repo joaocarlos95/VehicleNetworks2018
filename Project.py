@@ -15,7 +15,6 @@ GROUP = 'ff02::0'
 TIMOUT = 20
 
 # Variáveis Receiver
-PORT = 5005
 NODEID = 0
 MESSAGEID = 1
 COORDINATES = None
@@ -47,10 +46,10 @@ def sendFunction():
 	
 		message = str(NODEID) + "|" + str(MESSAGEID) + "|" + getCoordinates()
 
+		printMessages("\n++++++++++++++++++++")
 		printMessages("Sending message [" + message + "] to " + destinationAddress)
 
 		senderSocket.sendto(message.encode(), (destinationAddress, PORT, 0, SCOPEID))
-		printMessages(".\n.\n.\n.\nMessage sent!\n")
 
 		MESSAGEID += 1
 		time.sleep(3)
@@ -78,8 +77,9 @@ def receiveFunction():
 
 		message = message.decode().split("|")
 
-		print("\nMessage Received from " + str(payload[0].split("%")[0]))
-		print("Message: " + str(message))
+		printMessages("\n--------------------")
+		printMessages("Message Received from " + str(payload[0].split("%")[0]))
+		printMessages("Message: " + str(message))
 
 		nodeID = message[0]
 		messageID = message[1]
@@ -87,7 +87,7 @@ def receiveFunction():
 		timeOfPosition = int(float(message[3]))
 		timeOfPosition = datetime.datetime.fromtimestamp(timeOfPosition).strftime('%H:%M:%S')
 
-		if (differentMessageID(nodeID, messageID)):
+		if (differentMessageID(nodeID, messageID) and (int(NODEID) != int(nodeID))):
 			updateTable(nodeID, messageID, position, timeOfPosition, 0)
 			printTable()
 
@@ -169,9 +169,11 @@ def printTable():
 
 	global table
 
-	print("\nTable:")
-	for entry in table:
-		print(entry)
+	if INPUTMESSAGE == "Test":
+
+		print("\nTable:")
+		for entry in table:
+			print(entry)
 
 
 
