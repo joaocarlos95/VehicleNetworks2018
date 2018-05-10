@@ -1,9 +1,8 @@
 
 import socket
 import struct
-import datetime
-import time
-import _thread
+import datetime, time
+import _thread, threading
 import sys
 import hashlib
 import json
@@ -11,7 +10,7 @@ from uuid import getnode
 from math import sin, cos, sqrt, atan2, radians, degrees
 
 # Sender Variables
-SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
+SCOPEID = 8															# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5004
 DESTINATION_PORT = 5005
 DESTINATION_ADDRESS = 'ff02::0'
@@ -25,36 +24,46 @@ ALARM = False
 TIME_SENT_MESSAGES = 5												# Time between sent messages
 
 messageHeader = {
+	'protocolType': None,											# 0 = Beacon | 1 = DEN | 2 = CA
 	'stationID': 0,													# Station ID
+	# 'stationID': hex(getnode(),									# MAC Address
 	'messageID': 0, 												# Message ID
-	'stationType': 1,												# RSU = 0 | OBU = 1
-	'messageType': None,											# CA Message = 0 | DEN Message = 1
+}
+
+beaconBody = {
 	'stationPosition': None,										# Station Position
 	'stationPositionTime': None,									# Sation Position Time
 }
 
 messageBodyDEN = {
 	'actionID': [messageHeader['stationID'], 0], 					# Type Action (0 = Inform | 1 = Cancel)
-	'eventPosition': None,											# Motorcycle's Position
 	'eventTime': None,												# Time at event was gathered
+	'messageGenerationTime': None,									# Time of message generation
+	'eventPosition': None,											# Motorcycle's Position
+	'regionOfInterest': 1,											# 1 Km
 	'expiryTime': 1,												# 1 second
+	'stationType': 1,												# RSU = 0 | OBU = 1
+	'eventType': 0,													# 0 = theft
 	'eventSpeed': None,												# Motorcycle's Speed
 	'eventPositionHeading': None, 									# Motorcycle's Direction
-	'regionOfInterest': 1,											# 1 Km
-	'eventType': 0,													# 0 = theft
+	'traces': [],													# Motorcycle Trace
 }
+
 	
 table = []
+tableMutex = threading.Lock()
 
 
 
 class Station:
 
-	def __init__(self, stationID, messageID, stationPosition, stationPositionTime, timer):
+	def __init__(self, stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer):
 		self.stationID = stationID
 		self.messageID = messageID
+		self.GEOAdress = GEOAdress
 		self.stationPosition = stationPosition
 		self.stationPositionTime = stationPositionTime
+		self.isNeighbour = isNeighbour
 		self.timer = timer
 
 
@@ -66,6 +75,7 @@ class Station:
 def sendFunction():
 
 	global messageHeader
+	global beaconBody
 	global messageBodyDEN
 
 	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
@@ -77,22 +87,20 @@ def sendFunction():
 	while COORDINATES_INDEX >= 0:
 
 		if (ALARM == True):
-			#messageBodyDEN = updateNodeParameters(messageBodyDEN)
 
-			#currentPosition, currentPositionTime = getCurrentPosition()
-			#messageHeader['stationPosition'] = currentPosition
-			#messageHeader['stationPositionTime'] = currentPositionTime
-			messageHeader['messageType'] = 1
+			messageHeader['protocolType'] = 1
+			messageBodyDEN = updateNodeParameters(messageBodyDEN)
+			messageBodyDEN['messageGenerationTime'] = time.time()
 
 			message = [messageHeader, messageBodyDEN]
+
 		else:
-######################################################################################################################
-			messageBodyDEN = updateNodeParameters(messageBodyDEN)
-			messageHeader['messageType'] = 0
-			messageHeader['stationPosition'] = messageBodyDEN['eventPosition']
-			messageHeader['stationPositionTime'] = messageBodyDEN['eventTime']
-			message = [messageHeader, None]
-######################################################################################################################
+			stationPosition, stationPositionTime = getCurrentPosition()
+
+			messageHeader['protocolType'] = 0
+			beaconBody['stationPosition'] = stationPosition
+			beaconBody['stationPositionTime'] = stationPositionTime
+			message = [messageHeader, beaconBody]
 
 		messageEncoded = json.dumps(message).encode('utf-8')
 
@@ -112,20 +120,33 @@ def sendFunction():
 # Function for updating node data (position, speed and direction)								#
 #################################################################################################
 
-def updateNodeParameters(messageBody):
-
-	oldCoordinates = messageBody['eventPosition']
-	oldDetectionTime = messageBody['eventTime']
+def updateNodeParameters(messageBodyDEN):
 
 	newCoordinates, newDetectionTime = getCurrentPosition()
 
-	if (oldCoordinates != None):
+	messageBodyDEN['eventTime'] = newDetectionTime
+	messageBodyDEN['eventPosition'] = newCoordinates
+
+	if not messageBodyDEN['traces']:
+		messageBodyDEN['traces'].append([newCoordinates, newDetectionTime])
+
+	elif len(messageBodyDEN['traces']) == 5:
+		messageBodyDEN['traces'].pop(0)
+		messageBodyDEN['traces'].append([newCoordinates, newDetectionTime])
+		
+		oldCoordinates = messageBodyDEN['traces'][3][0]
+		oldDetectionTime = messageBodyDEN['traces'][3][1]
 		messageBodyDEN['eventPositionHeading'] = getBearing(oldCoordinates, newCoordinates)
 		messageBodyDEN['eventSpeed'] = getSpeed(oldCoordinates, oldDetectionTime, newCoordinates, newDetectionTime)
 
+	else:
+		messageBodyDEN['traces'].append([newCoordinates, newDetectionTime])
 
-	messageBodyDEN['eventPosition'] = newCoordinates
-	messageBodyDEN['eventTime'] = newDetectionTime
+		previousCoordinates = len(messageBodyDEN['traces']) - 2
+		oldCoordinates = messageBodyDEN['traces'][previousCoordinates][0]
+		oldDetectionTime = messageBodyDEN['traces'][previousCoordinates][1]
+		messageBodyDEN['eventPositionHeading'] = getBearing(oldCoordinates, newCoordinates)
+		messageBodyDEN['eventSpeed'] = getSpeed(oldCoordinates, oldDetectionTime, newCoordinates, newDetectionTime)
 
 	return messageBodyDEN
 
@@ -167,9 +188,9 @@ def getSpeed(oldCoordinates, oldDetectionTime, newCoordinates, newDetectionTime)
 	newLongitude = radians(newCoordinates[1])
 
 	distance = getDistance(oldCoordinates, newCoordinates)
-	differemceTime = newDetectionTime - oldDetectionTime 
+	differenceTime = newDetectionTime - oldDetectionTime 
 
-	return round((distance * 3600 / differemceTime), 3)
+	return round((distance * 3600 / differenceTime), 3)
 
 
 def getDistance(oldCoordinates, newCoordinates):
@@ -257,6 +278,9 @@ def findNode(stationID):
 def updateTable(stationID, messageID, stationPosition, stationPositionTime, timer):
 
 	global table
+	global tableMutex
+
+	tableMutex.acquire()
 
 	# Table is empty
 	if not table:
@@ -274,6 +298,8 @@ def updateTable(stationID, messageID, stationPosition, stationPositionTime, time
 		table[i].stationPosition = stationPosition
 		table[i].stationPositionTime = stationPositionTime
 		table[i].timer = timer
+
+	tableMutex.release()
 
 
 
