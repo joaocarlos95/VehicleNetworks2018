@@ -36,7 +36,7 @@ beaconBody = {
 }
 
 messageBodyDEN = {
-	'actionID': [messageHeader['stationID'], 0], 					# Type Action (0 = Inform | 1 = Cancel)
+	'actionID': [messageHeader['stationID'], 0], 					# Node source | nrº Repetitions
 	'eventTime': None,												# Time at event was gathered
 	'messageGenerationTime': None,									# Time of message generation
 	'eventPosition': None,											# Motorcycle's Position
@@ -72,7 +72,7 @@ class Station:
 # Function to send messages to all nodes in range												#
 #################################################################################################
 
-def sendFunction():
+def sendFunction(alarmActive):
 
 	global messageHeader
 	global beaconBody
@@ -86,11 +86,18 @@ def sendFunction():
 
 	while COORDINATES_INDEX >= 0:
 
-		if (ALARM == True):
+		if (alarmActive):
 
 			messageHeader['protocolType'] = 1
 			messageBodyDEN = updateNodeParameters(messageBodyDEN)
 			messageBodyDEN['messageGenerationTime'] = time.time()
+
+			nrRepetitions = messageBodyDEN['actionID'][1]
+
+			if nrRepetitions == 255:
+				messageBodyDEN['actionID'][1] = 0
+			else:
+				messageBodyDEN['actionID'][1] += 1
 
 			message = [messageHeader, messageBodyDEN]
 
@@ -111,6 +118,7 @@ def sendFunction():
 
 		messageHeader['messageID'] += 1
 		time.sleep(5)
+		#time.sleep(500 / 1000) 
 
 	return
 
@@ -362,6 +370,7 @@ def inputMessages():
 		userInput = input()
 		if userInput == "Alarm":
 			ALARM = True
+			_thread.start_new_thread(sendFunction,(True,))
 		else:
 			INPUT_MESSAGE = userInput
 
@@ -399,7 +408,7 @@ if __name__ == "__main__":
 	COORDINATES = fileCoordinates.readlines()
 	COORDINATES_INDEX = len(COORDINATES) - 1
 
-	_thread.start_new_thread(sendFunction,())
+	_thread.start_new_thread(sendFunction,(False,))
 	_thread.start_new_thread(receiveFunction,())
 	
 	while INPUT_MESSAGE != "Exit":
