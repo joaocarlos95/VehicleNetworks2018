@@ -15,7 +15,8 @@ SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5005
 DESTINATION_PORT = 5006
 DESTINATION_ADDRESS = 'ff02::0'
-TIMOUT = 20
+TIMOUT_TABLE = 20
+TIMOUT_BUFFER = 20
 
 # Receiver Variables
 COORDINATES = None
@@ -26,7 +27,7 @@ TIME_SENT_MESSAGES = 5												# Time between sent messages
 messageHeader = {
 	'protocolType': None,											# 0 = Beacon | 1 = DEN | 2 = CA
 	'stationID': 1,													# Station ID
-	# 'stationID': hex(getnode(),									# MAC Address
+	# 'stationID': hex(getnode()),									# MAC Address
 	'messageID': 0, 												# Message ID
 }
 
@@ -36,22 +37,28 @@ beaconBody = {
 }
 
 table = []
-tableMutex = threading.Lock()
 nodeBuffer = []
+tableMutex = threading.Lock()
 
 
 
 class Station:
 
-	def __init__(self, stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer):
+	def __init__(self, stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer):
 		self.stationID = stationID
 		self.messageID = messageID
-		self.GEOAddress = GEOAddress
 		self.stationPosition = stationPosition
 		self.stationPositionTime = stationPositionTime
 		self.isNeighbour = isNeighbour
 		self.timer = timer
 
+class MessageBuffer:
+	
+	def __init__(protocolType, messageBodyDEN, timer):
+		self.protocolType = protocolType
+		self.messageBodyDEN = messageBodyDEN
+		self.timer = timer
+		
 
 
 #################################################################################################
@@ -65,10 +72,6 @@ def sendFunction():
 	global messageBodyDEN
 
 	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-
-	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(hex(getnode()).encode('utf-8'))
-	#NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
 
 	while COORDINATES_INDEX >= 0:
 
@@ -88,6 +91,7 @@ def sendFunction():
 
 		messageHeader['messageID'] += 1
 		time.sleep(5)
+		#time.sleep(500 / 1000) 
 		#time.sleep((500 + random.randint(0, 100)) / 1000) 
 		
 	return
@@ -100,11 +104,9 @@ def sendFunction():
 
 def forwardMessage(message, destinationAddress):
 
-	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+	global messageHeader
 
-	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(hex(getnode()).encode('utf-8'))
-	#NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
+	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
 
 	messageEncoded = json.dumps(message).encode('utf-8')
 
@@ -128,7 +130,6 @@ def distancePassed(regionOfInterest, eventPosition, currentPosition):
 
 def getDistance(oldCoordinates, newCoordinates):
 
-	# approximate radius of earth in km
 	radius = 6373.0
 
 	oldLatitude = radians(oldCoordinates[0])
@@ -171,10 +172,9 @@ def receiveFunction():
 
 		stationID = messageReceivedHeader['stationID']
 		messageID = messageReceivedHeader['messageID']
-		GEOAddress = str(payload[0].split("%")[0])
 
 		printMessages("\n--------------------")
-		printMessages("Message Received from " + GEOAddress)
+		printMessages("Message Received from " + str(payload[0].split("%")[0]))
 		printMessages("Message: " + str(messageDecoded))
 
 		if (isNewMessage(stationID, messageID) and messageHeader['stationID'] != stationID):
@@ -182,7 +182,7 @@ def receiveFunction():
 			if messageReceivedHeader['protocolType'] == 0:
 				stationPosition = messageReceivedBody['stationPosition']
 				stationPositionTime = messageReceivedBody['stationPositionTime']
-				updateTable(stationID, messageID, GEOAddress, stationPosition, stationPositionTime, 1, 0)
+				updateTable(stationID, messageID, stationPosition, stationPositionTime, 1, 0)
 		
 			elif messageReceivedHeader['protocolType'] == 1:
 
@@ -230,28 +230,37 @@ def findNode(stationID):
 	return None
 
 
-def retransmitProbability(regionOfInterest, eventPosition, currentPosition):
+def retransmitProbability(regionOfInterest, eventPosition, currentPosition, protocolType, messageBody):
 
 	sizeTable = len(table)
 
 	if sizeTable == 0:
-		# Buffer
+		appendBuffer(protocolType, messageBody)
 		return None
 	else:
 		x = 100 / sizeTable
 		distanceEvent = getDistance(eventPosition, currentPosition)
 		return (distanceEvent / regionOfInterest) * x
 
-def apeendBuffer():
+def appendBuffer(protocolType, messageBody):
 
-	return
+	global nodeBuffer
 
-def test(nrNos, distance):
+	messageBuffer = MessageBuffer(protocolType, messageBodyDEN, 0)
+	nodeBuffer.append(messageBuffer)
+	_thread.start_new_thread(updateTimerThread,(True,))
 
-	x = 100 / nrNos
-	distanceEvent = distance
-	print((distanceEvent / 1) * x, random.randint(0,100))
+def dispatchBuffer():
 
+	global nodeBuffer
+	global messageHeader
+
+	while len(nodeBuffer) != 0:
+		for entry in nodeBuffer:
+			messageHeader['protocolType'] = entry.protocolType
+			messageBody = entry.messageBody
+			message = [messageHeader, messageBody]
+			forwardMessage(message, 'ff02::0')
 
 
 
@@ -259,28 +268,27 @@ def test(nrNos, distance):
 # Function to update Neighbor table																#
 #################################################################################################
 
-def updateTable(stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer):
+def updateTable(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer):
 
 	global table
 	global tableMutex
 
 	tableMutex.acquire()
 
-	# Table is empty
 	if not table:
-		station = Station(stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer)
+		station = Station(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer)
 		table.append(station)
-		_thread.start_new_thread(updateTimerThread,())
+		_thread.start_new_thread(updateTimerThread,(False,))
 		tableMutex.release()
+		dispatchBuffer()
 		return		
 
 	i = findNode(stationID)
 	if i == None:
-		station = Station(stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer)
+		station = Station(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer)
 		table.append(station)
 	else:
 		table[i].messageID = messageID
-		table[i].GEOAddress = GEOAddress
 		table[i].stationPosition = stationPosition
 		table[i].stationPositionTime = stationPositionTime
 		table[i].isNeighbour = isNeighbour
@@ -294,21 +302,34 @@ def updateTable(stationID, messageID, GEOAddress, stationPosition, stationPositi
 # Function to update the timer and remove the entry if the limit passes 						#
 #################################################################################################
 
-def updateTimerThread():
+def updateTimerThread(isBuffer):
 
 	global table
+	global nodeBuffer
 
-	while len(table) != 0:
-		index = 0
-		for entry in table:
-			if entry.timer == TIMOUT:
-				del table[index]				
-				printTable()
-			else:
-				entry.timer += 1
-				printTable()
-			index += 1
-		time.sleep(1)
+	if isBuffer:
+		while len(nodeBuffer) != 0:
+			index = 0
+			for entry in nodeBuffer:
+				if entry.timer == TIMOUT_BUFFER:
+					del nodeBuffer[index]				
+				else:
+					entry.timer += 1
+				index += 1
+			time.sleep(1)
+
+	else:
+		while len(table) != 0:
+			index = 0
+			for entry in table:
+				if entry.timer == TIMOUT_TABLE:
+					del table[index]				
+					printTable()
+				else:
+					entry.timer += 1
+					printTable()
+				index += 1
+			time.sleep(1)
 
 
 
@@ -325,8 +346,7 @@ def printTable():
 		print("\nTable:")
 		for entry in table:
 			stationPositionTime = datetime.datetime.fromtimestamp(entry.stationPositionTime).strftime('%H:%M:%S')
-			print("[ " + str(entry.stationID) + " | " + str(entry.messageID) + " | " + 
-				str(entry.GEOAddress) + " | " + str(entry.stationPosition) + " | " + 
+			print("[ " + str(entry.stationID) + " | " + str(entry.messageID) + " | " + str(entry.stationPosition) + " | " + 
 				str(stationPositionTime) + " | " + str(entry.timer) + " ]\n")
 
 

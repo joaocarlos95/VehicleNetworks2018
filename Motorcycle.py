@@ -26,7 +26,7 @@ TIME_SENT_MESSAGES = 5												# Time between sent messages
 messageHeader = {
 	'protocolType': None,											# 0 = Beacon | 1 = DEN | 2 = CA
 	'stationID': 0,													# Station ID
-	# 'stationID': hex(getnode(),									# MAC Address
+	# 'stationID': hex(getnode()),									# MAC Address
 	'messageID': 0, 												# Message ID
 }
 
@@ -57,10 +57,9 @@ tableMutex = threading.Lock()
 
 class Station:
 
-	def __init__(self, stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer):
+	def __init__(self, stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer):
 		self.stationID = stationID
 		self.messageID = messageID
-		self.GEOAdress = GEOAdress
 		self.stationPosition = stationPosition
 		self.stationPositionTime = stationPositionTime
 		self.isNeighbour = isNeighbour
@@ -79,10 +78,6 @@ def sendFunction(alarmActive):
 	global messageBodyDEN
 
 	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-
-	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(hex(getnode()).encode('utf-8'))
-	#NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
 
 	while COORDINATES_INDEX >= 0:
 
@@ -283,28 +278,28 @@ def findNode(stationID):
 # Function to update Neighbor table																#
 #################################################################################################
 
-def updateTable(stationID, messageID, stationPosition, stationPositionTime, timer):
+def updateTable(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer):
 
 	global table
 	global tableMutex
 
 	tableMutex.acquire()
 
-	# Table is empty
 	if not table:
-		station = Station(stationID, messageID, stationPosition, stationPositionTime, timer)
+		station = Station(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer)
 		table.append(station)
 		_thread.start_new_thread(updateTimerThread,())
 		return		
 
 	i = findNode(stationID)
 	if i == None:
-		station = Station(stationID, messageID, stationPosition, stationPositionTime, timer)
+		station = Station(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer)
 		table.append(station)
 	else:
 		table[i].messageID = messageID
 		table[i].stationPosition = stationPosition
 		table[i].stationPositionTime = stationPositionTime
+		table[i].isNeighbour = isNeighbour
 		table[i].timer = timer
 
 	tableMutex.release()

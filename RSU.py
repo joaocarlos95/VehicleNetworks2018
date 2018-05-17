@@ -8,6 +8,8 @@ import hashlib
 import json
 from uuid import getnode
 from math import sin, cos, sqrt, atan2, radians
+import requests
+
 
 # Sender Variables
 SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
@@ -27,7 +29,7 @@ TIME_SENT_MESSAGES = 5												# Time between sent messages
 messageHeader = {
 	'protocolType': None,											# 0 = Beacon | 1 = DEN | 2 = CA
 	'stationID': 2,													# Station ID
-	# 'stationID': hex(getnode(),									# MAC Address
+	# 'stationID': hex(getnode()),									# MAC Address
 	'messageID': 0, 												# Message ID
 }
 
@@ -43,10 +45,9 @@ tableMutex = threading.Lock()
 
 class Station:
 
-	def __init__(self, stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer):
+	def __init__(self, stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer):
 		self.stationID = stationID
 		self.messageID = messageID
-		self.GEOAddress = GEOAddress
 		self.stationPosition = stationPosition
 		self.stationPositionTime = stationPositionTime
 		self.isNeighbour = isNeighbour
@@ -66,10 +67,6 @@ def sendFunction():
 
 	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
 
-	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(hex(getnode()).encode('utf-8'))
-	#NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
-
 	while COORDINATES_INDEX >= 0:
 
 		stationPosition, stationPositionTime = getCurrentPosition()
@@ -88,6 +85,7 @@ def sendFunction():
 
 		messageHeader['messageID'] += 1
 		time.sleep(5)
+		#time.sleep(500 / 1000) 
 		#time.sleep((500 + random.randint(0, 100)) / 1000) 
 		
 	return
@@ -97,24 +95,6 @@ def sendFunction():
 #################################################################################################
 # Function for forwarding messages 																#
 #################################################################################################
-
-def forwardMessage(message, destinationAddress):
-
-	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-
-	hashValue = hashlib.blake2s(digest_size=2)
-	hashValue.update(hex(getnode()).encode('utf-8'))
-	#NODEID = int.from_bytes(hashValue.digest(), byteorder='big')
-
-	messageEncoded = json.dumps(message).encode('utf-8')
-
-	printMessages("\n++++++++++++++++++++")
-	printMessages("Forwarding message [" + str(message) + "] to " + destinationAddress)
-	senderSocket.sendto(messageEncoded, (destinationAddress, DESTINATION_PORT, 0, SCOPEID))
-
-	messageHeader['messageID'] += 1
-	return
-
 
 def timeExpired(expiryTime, positionTime):
 
@@ -128,7 +108,6 @@ def distancePassed(regionOfInterest, eventPosition, currentPosition):
 
 def getDistance(oldCoordinates, newCoordinates):
 
-	# approximate radius of earth in km
 	radius = 6373.0
 
 	oldLatitude = radians(oldCoordinates[0])
@@ -229,10 +208,9 @@ def receiveFunction():
 		
 		stationID = messageReceivedHeader['stationID']
 		messageID = messageReceivedHeader['messageID']
-		GEOAddress = str(payload[0].split("%")[0])
 
 		printMessages("\n--------------------")
-		printMessages("Message Received from " + GEOAddress)
+		printMessages("Message Received from " + str(payload[0].split("%")[0]))
 		printMessages("Message: " + str(messageDecoded))
 
 		if (isNewMessage(stationID, messageID) and messageHeader['stationID'] != stationID):
@@ -242,7 +220,7 @@ def receiveFunction():
 			if messageReceivedHeader['protocolType'] == 0:
 				stationPosition = messageReceivedBody['stationPosition']
 				stationPositionTime = messageReceivedBody['stationPositionTime']
-				updateTable(stationID, messageID, GEOAddress, stationPosition, stationPositionTime, 1, 0)
+				updateTable(stationID, messageID, stationPosition, stationPositionTime, 1, 0)
 		
 			elif messageReceivedHeader['protocolType'] == 1:
 
@@ -252,11 +230,6 @@ def receiveFunction():
 				eventTime = messageReceivedBody['eventTime']
 				regionOfInterest = messageReceivedBody['regionOfInterest']
 				eventPosition = messageReceivedBody['eventPosition']
-
-				#if True:
-			#		messageHeader['protocolType'] = 1
-			#		message = [messageHeader, messageReceivedBody]
-			#		forwardMessage(message, 'ff02::0')
 
 				if INTER_CONECTION and messageReceivedBody['eventType'] == 0:
 					updateDatabase(messageReceivedBody)
@@ -300,16 +273,15 @@ def findNode(stationID):
 # Function to update Neighbor table																#
 #################################################################################################
 
-def updateTable(stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer):
+def updateTable(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer):
 
 	global table
 	global tableMutex
 
 	tableMutex.acquire()
 
-	# Table is empty
 	if not table:
-		station = Station(stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer)
+		station = Station(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer)
 		table.append(station)
 		_thread.start_new_thread(updateTimerThread,())
 		tableMutex.release()
@@ -317,11 +289,10 @@ def updateTable(stationID, messageID, GEOAddress, stationPosition, stationPositi
 
 	i = findNode(stationID)
 	if i == None:
-		station = Station(stationID, messageID, GEOAddress, stationPosition, stationPositionTime, isNeighbour, timer)
+		station = Station(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer)
 		table.append(station)
 	else:
 		table[i].messageID = messageID
-		table[i].GEOAddress = GEOAddress
 		table[i].stationPosition = stationPosition
 		table[i].stationPositionTime = stationPositionTime
 		table[i].isNeighbour = isNeighbour
@@ -366,8 +337,7 @@ def printTable():
 		print("\nTable:")
 		for entry in table:
 			stationPositionTime = datetime.datetime.fromtimestamp(entry.stationPositionTime).strftime('%H:%M:%S')
-			print("[ " + str(entry.stationID) + " | " + str(entry.messageID) + " | " + 
-				str(entry.GEOAddress) + " | " + str(entry.stationPosition) + " | " + 
+			print("[ " + str(entry.stationID) + " | " + str(entry.messageID) + " | " + str(entry.stationPosition) + " | " + 
 				str(stationPositionTime) + " | " + str(entry.timer) + " ]\n")
 
 
@@ -429,7 +399,8 @@ def updateDatabase(messageReceivedBody):
 
 	stolenVehicle = {
 		'stationID': messageReceivedBody['actionID'][0],
-		'eventPosition': messageReceivedBody['eventPosition'],
+		'eventPositionLatitude': messageReceivedBody['eventPosition'][0],
+		'eventPositionLongitude': messageReceivedBody['eventPosition'][1],
 		'eventTime': messageReceivedBody['eventTime'],
 		'eventSpeed': messageReceivedBody['eventSpeed'],
 		'eventPositionHeading': messageReceivedBody['eventPositionHeading'],
@@ -439,7 +410,8 @@ def updateDatabase(messageReceivedBody):
 
 	printMessages("\n++++++++++++++++++++")
 	printMessages("Sending message [" + str(stolenVehicle) + "] to " + str(SERVER_ADDRESS))
-	printMessages("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!UPDATE_DATABSE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
+	requests.post("http://motoalarm.cf/v1/Api.php?apicall=updateposition", data=stolenVehicle)
 
 	#databaseSocket.sendto(messageEncoded, (DESTINATION_ADDRESS, DESTINATION_PORT, 0, SCOPEID))
 
