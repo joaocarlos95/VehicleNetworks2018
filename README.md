@@ -17,6 +17,6 @@ This project simulates a multiple node communication via IPv6 multicast, where t
   - To exit the program type **Exit**
   - Alarm mode is activated by writing **Alarm** (only works with Motorcycle)
   
-To see motorcycle traces open the [URL](https://motoalarm.cf/v1/Api.php?apicall=updateposition) and refresh the browser to update motorcycle's location
+To see motorcycle traces open the [URL](https://motoalarm.cf) and refresh the browser to update motorcycle's location
 
 ###### Follow us in [Trello](https://trello.com/b/YA3SgxVt/rv-17-18g1)
