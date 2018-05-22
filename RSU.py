@@ -9,10 +9,13 @@ import json
 from uuid import getnode
 from math import sin, cos, sqrt, atan2, radians
 import requests
+import Crypto.Hash.MD5 as MD5
+from Crypto.PublicKey import RSA
+
 
 
 # Sender Variables
-SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
+SCOPEID = 5 														# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5006
 DESTINATION_PORT = 5007
 DESTINATION_ADDRESS = 'ff02::0'
@@ -128,46 +131,47 @@ def getDistance(oldCoordinates, newCoordinates):
 #################################################################################################
 # Função para receber mensagens de qualquer nó da rede (Receiver)								#
 #################################################################################################
+#
+#def receiveFunction():
 
-def receiveFunction():
+#	global messageHeader
 
-	global messageHeader
+#	receiverSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
 
-	receiverSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+#	groupBin = socket.inet_pton(socket.AF_INET6, 'ff02::0')
+#	mReq = groupBin + struct.pack('@I', SCOPEID)
 
-	groupBin = socket.inet_pton(socket.AF_INET6, 'ff02::0')
-	mReq = groupBin + struct.pack('@I', SCOPEID)
+#	receiverSocket.bind(('', SOURCE_PORT))
+#	receiverSocket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mReq)
 
-	receiverSocket.bind(('', SOURCE_PORT))
-	receiverSocket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mReq)
+#	while True:
+#		message, payload = receiverSocket.recvfrom(2048)
 
-	while True:
-		message, payload = receiverSocket.recvfrom(1024)
+#		messageDecoded = json.loads(message.decode('utf-8'))
+#		messageReceivedHeader = messageDecoded[0]
+#		messageReceivedBody = messageDecoded[1]
+#		messageSecurity = messageDecoded[2]
 
-		messageDecoded = json.loads(message.decode('utf-8'))
-		messageReceivedHeader = messageDecoded[0]
-		messageReceivedBody = messageDecoded[1]
+#		printMessages("\n--------------------")
+#		printMessages("Message Received from " + str(payload[0].split("%")[0]))
+#		printMessages("Message: " + str(messageDecoded))
 
-		printMessages("\n--------------------")
-		printMessages("Message Received from " + str(payload[0].split("%")[0]))
-		printMessages("Message: " + str(messageDecoded))
+#		receivedStationID = messageReceivedHeader['stationID']
+#		receivedMessageID = messageReceivedHeader['messageID']
+#		receivedStationPosition = messageReceivedHeader['stationPosition']
+#		receivedStationPositionTime = messageReceivedHeader['stationPositionTime']
 
-		receivedStationID = messageReceivedHeader['stationID']
-		receivedMessageID = messageReceivedHeader['messageID']
-		receivedStationPosition = messageReceivedHeader['stationPosition']
-		receivedStationPositionTime = messageReceivedHeader['stationPositionTime']
-
-		if (isNewMessage(receivedStationID, receivedMessageID) and (messageHeader['stationID'] != receivedStationID)):
-			updateTable(receivedStationID, receivedMessageID, receivedStationPosition, receivedStationPositionTime, 0)
+#		if (isNewMessage(receivedStationID, receivedMessageID) and (messageHeader['stationID'] != receivedStationID)):
+#			updateTable(receivedStationID, receivedMessageID, receivedStationPosition, receivedStationPositionTime, 0)
 		
-			if messageReceivedHeader['messageType'] == 1:
+#			if messageReceivedHeader['messageType'] == 1:
 
-				expiryTime = messageReceivedBody['expiryTime']
-				eventTime = messageReceivedBody['eventTime']
-				regionOfInterest = messageReceivedBody['regionOfInterest']
-				eventPosition = messageReceivedBody['eventPosition']
+#				expiryTime = messageReceivedBody['expiryTime']
+#				eventTime = messageReceivedBody['eventTime']
+#				regionOfInterest = messageReceivedBody['regionOfInterest']
+#				eventPosition = messageReceivedBody['eventPosition']
 
-				messageHeader['messageType'] = 1
+#				messageHeader['messageType'] = 1
 
 				#currentPosition, currentPositionTime = getCurrentPosition()
 				
@@ -176,16 +180,16 @@ def receiveFunction():
 					#messageHeader['stationPosition'] = stationPosition
 					#messageHeader['stationPositionTime'] = stationPositionTime
 ######################################################################################################################
-				if True:
-					messageHeader['stationPosition'] = messageHeader['stationPosition']
-					messageHeader['stationPositionTime'] = messageHeader['stationPositionTime']
+#				if True:
+#					messageHeader['stationPosition'] = messageHeader['stationPosition']
+#					messageHeader['stationPositionTime'] = messageHeader['stationPositionTime']
 ######################################################################################################################
 
-					message = [messageHeader, messageReceivedBody]
-					forwardMessage(message, 'ff02::0')
+#					message = [messageHeader, messageReceivedBody]
+#					forwardMessage(message, 'ff02::0')
 
-				if INTER_CONECTION and messageReceivedBody['eventType'] == 0:
-					updateDatabase(messageReceivedBody)
+#				if INTER_CONECTION and messageReceivedBody['eventType'] == 0:
+#					updateDatabase(messageReceivedBody, messageSecurity)
 
 def receiveFunction():
 
@@ -200,11 +204,12 @@ def receiveFunction():
 	receiverSocket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mReq)
 
 	while True:
-		message, payload = receiverSocket.recvfrom(1024)
+		message, payload = receiverSocket.recvfrom(2048)
 
 		messageDecoded = json.loads(message.decode('utf-8'))
 		messageReceivedHeader = messageDecoded[0]
 		messageReceivedBody = messageDecoded[1]
+		messageSecurity = messageDecoded[2]
 		
 		stationID = messageReceivedHeader['stationID']
 		messageID = messageReceivedHeader['messageID']
@@ -224,15 +229,13 @@ def receiveFunction():
 		
 			elif messageReceivedHeader['protocolType'] == 1:
 
-
-
 				expiryTime = messageReceivedBody['expiryTime']
 				eventTime = messageReceivedBody['eventTime']
 				regionOfInterest = messageReceivedBody['regionOfInterest']
 				eventPosition = messageReceivedBody['eventPosition']
 
 				if INTER_CONECTION and messageReceivedBody['eventType'] == 0:
-					updateDatabase(messageReceivedBody)
+					updateDatabase(messageReceivedBody, messageSecurity)
 
 				#currentPosition, newDetectionTime = getCurrentPosition()
 			
@@ -393,9 +396,21 @@ def printMessages(message):
 # Function to update database 																	#
 #################################################################################################
 
-def updateDatabase(messageReceivedBody):
+def updateDatabase(messageReceivedBody, messageSecurity):
 
 	databaseSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+
+	with open('moto.key') as f1: key_text2 = f1.read()
+	key2 = RSA.importKey(key_text2)
+	f1.close()
+
+	pubkey = key2.publickey()
+
+	hash = MD5.new(json.dumps(messageReceivedBody).encode('utf-8')).digest()
+	
+	print(hash)
+	assert pubkey.verify(hash, messageSecurity.get("signature"))
+	print("ok")
 
 	stolenVehicle = {
 		'stationID': messageReceivedBody['actionID'][0],

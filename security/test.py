@@ -23,6 +23,8 @@ hash = MD5.new(plaintext).digest()
 
 #sign the hash
 signature = key.sign(hash, '')
+print (signature)
+
 print(len(signature), RSA.__name__)
 
 

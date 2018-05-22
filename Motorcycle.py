@@ -8,9 +8,11 @@ import hashlib
 import json
 from uuid import getnode
 from math import sin, cos, sqrt, atan2, radians, degrees
+import Crypto.Hash.MD5 as MD5
+from Crypto.PublicKey import RSA
 
 # Sender Variables
-SCOPEID = 8															# scopeID in the end of the line where IPv6 address is
+SCOPEID = 5															# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5004
 DESTINATION_PORT = 5005
 DESTINATION_ADDRESS = 'ff02::0'
@@ -49,6 +51,11 @@ messageBodyDEN = {
 	'traces': [],													# Motorcycle Trace
 }
 
+security = {
+	'signature': None
+}
+
+
 	
 table = []
 tableMutex = threading.Lock()
@@ -76,6 +83,7 @@ def sendFunction(alarmActive):
 	global messageHeader
 	global beaconBody
 	global messageBodyDEN
+	global security
 
 	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
 
@@ -94,7 +102,8 @@ def sendFunction(alarmActive):
 			else:
 				messageBodyDEN['actionID'][1] += 1
 
-			message = [messageHeader, messageBodyDEN]
+			security['signature'] = hash(messageBodyDEN)
+			message = [messageHeader, messageBodyDEN, security]
 
 		else:
 			stationPosition, stationPositionTime = getCurrentPosition()
@@ -102,7 +111,7 @@ def sendFunction(alarmActive):
 			messageHeader['protocolType'] = 0
 			beaconBody['stationPosition'] = stationPosition
 			beaconBody['stationPositionTime'] = stationPositionTime
-			message = [messageHeader, beaconBody]
+			message = [messageHeader, beaconBody, None]
 
 		messageEncoded = json.dumps(message).encode('utf-8')
 
@@ -379,6 +388,22 @@ def printMessages(message):
 	if INPUT_MESSAGE == "Test":
 		print(message)
 
+
+
+#################################################################################################
+# Função para fazer imprimir conteúdo quando o Test Mode está activo							#
+#################################################################################################
+
+def hash(payload):
+
+	with open('moto.key') as f: key_text = f.read()
+	key = RSA.importKey(key_text)
+	f.close()
+
+	hash = MD5.new(json.dumps(payload).encode('utf-8')).digest()
+	print(hash)
+
+	return key.sign(hash, '')
 
 
 #####################################################################################

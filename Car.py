@@ -11,7 +11,7 @@ from uuid import getnode
 from math import sin, cos, sqrt, atan2, radians
 
 # Sender Variables
-SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
+SCOPEID = 5 														# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5005
 DESTINATION_PORT = 5006
 DESTINATION_ADDRESS = 'ff02::0'
@@ -39,6 +39,7 @@ beaconBody = {
 table = []
 nodeBuffer = []
 tableMutex = threading.Lock()
+bufferMutex = threading.Lock()
 
 
 
@@ -54,11 +55,12 @@ class Station:
 
 class MessageBuffer:
 	
-	def __init__(protocolType, messageBodyDEN, timer):
+	def __init__(protocolType, messageBody, security, timer):
 		self.protocolType = protocolType
-		self.messageBodyDEN = messageBodyDEN
+		self.messageBody = messageBody
+		self.security = security
 		self.timer = timer
-		
+
 
 
 #################################################################################################
@@ -80,7 +82,7 @@ def sendFunction():
 		messageHeader['protocolType'] = 0
 		beaconBody['stationPosition'] = stationPosition
 		beaconBody['stationPositionTime'] = stationPositionTime
-		message = [messageHeader, beaconBody]
+		message = [messageHeader, beaconBody, None]
 
 		messageEncoded = json.dumps(message).encode('utf-8')
 
@@ -164,11 +166,16 @@ def receiveFunction():
 	receiverSocket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mReq)
 
 	while True:
-		message, payload = receiverSocket.recvfrom(1024)
+		message, payload = receiverSocket.recvfrom(2048)
+		
+		try:
+			messageDecoded = json.loads(message.decode('utf-8'))
+		except (OSError, IOError) as e:
+			print("\nError in decoding message.. =(")
 
-		messageDecoded = json.loads(message.decode('utf-8'))
 		messageReceivedHeader = messageDecoded[0]
 		messageReceivedBody = messageDecoded[1]
+		messageSecurity = messageDecoded[2]
 
 		stationID = messageReceivedHeader['stationID']
 		messageID = messageReceivedHeader['messageID']
@@ -193,14 +200,14 @@ def receiveFunction():
 
 				if True:
 					messageHeader['protocolType'] = 1
-					message = [messageHeader, messageReceivedBody]
+					message = [messageHeader, messageReceivedBody, messageSecurity]
 					forwardMessage(message, 'ff02::0')
 
 				#currentPosition, newDetectionTime = getCurrentPosition()
 			
-				#if !(timeExpired(expiryTime, eventTime) and 
+				#if not(timeExpired(expiryTime, eventTime) and 
 				#	distancePassed(regionOfInterest, eventPosition, currentPosition)):
-				#	toTransmit = retransmitProbability(regionOfInterest, eventPosition, currentPosition)
+				#	toTransmit = retransmitProbability(regionOfInterest, eventPosition, currentPosition, protocolType, messageBody, security)
 				#	if toTransmit != None and toTransmit <= random.randint(0,100):
 				#
 				#		messageHeader['protocolType'] = 1
@@ -230,25 +237,65 @@ def findNode(stationID):
 	return None
 
 
-def retransmitProbability(regionOfInterest, eventPosition, currentPosition, protocolType, messageBody):
+def retransmitProbability(regionOfInterest, eventPosition, currentPosition, protocolType, messageBody, security):
 
 	sizeTable = len(table)
 
 	if sizeTable == 0:
-		appendBuffer(protocolType, messageBody)
+		appendBuffer(protocolType, messageBody, security)
 		return None
 	else:
 		x = 100 / sizeTable
 		distanceEvent = getDistance(eventPosition, currentPosition)
 		return (distanceEvent / regionOfInterest) * x
 
-def appendBuffer(protocolType, messageBody):
+
+def appendBuffer(protocolType, messageBody, security):
 
 	global nodeBuffer
+	global bufferMutex
+	
+	bufferMutex.acquire()
 
-	messageBuffer = MessageBuffer(protocolType, messageBodyDEN, 0)
-	nodeBuffer.append(messageBuffer)
-	_thread.start_new_thread(updateTimerThread,(True,))
+	if not nodeBuffer:
+		messageBuffer = MessageBuffer(protocolType, messageBodyDEN, security, 0)
+		nodeBuffer.append(messageBuffer)
+		_thread.start_new_thread(updateTimerThread,(True,))
+		bufferMutex.release()
+		return
+
+	index = findInBuffer(messageBody['actionID'][0])
+	if index == None:
+		messageBuffer = MessageBuffer(protocolType, messageBodyDEN, security, 0)
+		nodeBuffer.append(messageBuffer)
+
+	elif updateBuffer(index, protocolType, messageBody):
+		del nodeBuffer[index]
+		messageBuffer = MessageBuffer(protocolType, messageBodyDEN, security, 0)
+		nodeBuffer.append(messageBuffer)			
+
+	bufferMutex.release()
+
+
+def findInBuffer(stationID):
+
+	index = 0
+	for message in nodeBuffer:
+		if message.stationID == stationID:
+			return index
+		index += 1
+	return None
+
+
+def updateBuffer(index, protocolType, messageBody):
+
+	if protocolType == 1:
+
+		eventTimeBuffer = nodeBuffer[index].messageBody['eventTime']
+		eventTime = messageBody['eventTime']
+
+		return eventTime > eventTimeBuffer
+
 
 def dispatchBuffer():
 
@@ -257,10 +304,16 @@ def dispatchBuffer():
 
 	while len(nodeBuffer) != 0:
 		for entry in nodeBuffer:
-			messageHeader['protocolType'] = entry.protocolType
-			messageBody = entry.messageBody
-			message = [messageHeader, messageBody]
-			forwardMessage(message, 'ff02::0')
+
+			expiryTime = entry.messageBody['expiryTime']
+			positionTime = entry.messageBody['positionTime']
+			
+			if not(timeExpired(expiryTime, eventTime)):
+				messageHeader['protocolType'] = entry.protocolType
+				messageBody = entry.messageBody
+				security = entry.security
+				message = [messageHeader, messageBody, security]
+				forwardMessage(message, 'ff02::0')
 
 
 
@@ -311,7 +364,10 @@ def updateTimerThread(isBuffer):
 		while len(nodeBuffer) != 0:
 			index = 0
 			for entry in nodeBuffer:
-				if entry.timer == TIMOUT_BUFFER:
+				expiryTime = entry.messageBody['expiryTime']
+				positionTime = entry.messageBody['positionTime']
+				
+				if entry.timer == TIMOUT_BUFFER or timeExpired(expiryTime, positionTime):
 					del nodeBuffer[index]				
 				else:
 					entry.timer += 1
