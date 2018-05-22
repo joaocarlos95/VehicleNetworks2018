@@ -11,7 +11,7 @@ from uuid import getnode
 from math import sin, cos, sqrt, atan2, radians
 
 # Sender Variables
-SCOPEID = 5 														# scopeID in the end of the line where IPv6 address is
+SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5005
 DESTINATION_PORT = 5006
 DESTINATION_ADDRESS = 'ff02::0'

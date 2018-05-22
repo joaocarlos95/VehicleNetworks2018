@@ -12,7 +12,7 @@ import Crypto.Hash.MD5 as MD5
 from Crypto.PublicKey import RSA
 
 # Sender Variables
-SCOPEID = 5															# scopeID in the end of the line where IPv6 address is
+SCOPEID = 8															# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5004
 DESTINATION_PORT = 5005
 DESTINATION_ADDRESS = 'ff02::0'
@@ -401,7 +401,6 @@ def hash(payload):
 	f.close()
 
 	hash = MD5.new(json.dumps(payload).encode('utf-8')).digest()
-	print(hash)
 
 	return key.sign(hash, '')
 

@@ -15,7 +15,7 @@ from Crypto.PublicKey import RSA
 
 
 # Sender Variables
-SCOPEID = 5 														# scopeID in the end of the line where IPv6 address is
+SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5006
 DESTINATION_PORT = 5007
 DESTINATION_ADDRESS = 'ff02::0'
@@ -408,27 +408,25 @@ def updateDatabase(messageReceivedBody, messageSecurity):
 
 	hash = MD5.new(json.dumps(messageReceivedBody).encode('utf-8')).digest()
 	
-	print(hash)
-	assert pubkey.verify(hash, messageSecurity.get("signature"))
-	print("ok")
+	if pubkey.verify(hash, messageSecurity.get("signature")):
+		
+		stolenVehicle = {
+			'stationID': messageReceivedBody['actionID'][0],
+			'eventPositionLatitude': messageReceivedBody['eventPosition'][0],
+			'eventPositionLongitude': messageReceivedBody['eventPosition'][1],
+			'eventTime': messageReceivedBody['eventTime'],
+			'eventSpeed': messageReceivedBody['eventSpeed'],
+			'eventPositionHeading': messageReceivedBody['eventPositionHeading'],
+		}
+		messageEncoded = json.dumps(stolenVehicle).encode('utf-8')
 
-	stolenVehicle = {
-		'stationID': messageReceivedBody['actionID'][0],
-		'eventPositionLatitude': messageReceivedBody['eventPosition'][0],
-		'eventPositionLongitude': messageReceivedBody['eventPosition'][1],
-		'eventTime': messageReceivedBody['eventTime'],
-		'eventSpeed': messageReceivedBody['eventSpeed'],
-		'eventPositionHeading': messageReceivedBody['eventPositionHeading'],
-	}
+		printMessages("\n++++++++++++++++++++")
+		printMessages("Sending message [" + str(stolenVehicle) + "] to " + str(SERVER_ADDRESS))
 
-	messageEncoded = json.dumps(stolenVehicle).encode('utf-8')
-
-	printMessages("\n++++++++++++++++++++")
-	printMessages("Sending message [" + str(stolenVehicle) + "] to " + str(SERVER_ADDRESS))
-
-	requests.post("http://motoalarm.cf/v1/Api.php?apicall=updateposition", data=stolenVehicle)
-
-	#databaseSocket.sendto(messageEncoded, (DESTINATION_ADDRESS, DESTINATION_PORT, 0, SCOPEID))
+		requests.post("http://motoalarm.cf/v1/Api.php?apicall=updateposition", data=stolenVehicle)
+		print("A")
+		return
+	print("B")
 
 
 #####################################################################################
