@@ -36,7 +36,7 @@ beaconBody = {
 	'stationPositionTime': None,									# Sation Position Time
 }
 messageBodyDEN = {
-	'actionID': [messageHeader['stationID'], 0], 					# Node source | nrº Repetitions
+	'actionID': [messageHeader['stationID'], 0], 					# Node source | nr Repetitions
 	'eventTime': None,												# Time at event was gathered
 	'eventPosition': None,											# Motorcycle's Position
 	'regionOfInterest': 1,											# 1 Km
@@ -468,7 +468,7 @@ def inputMessages():
 
 
 #################################################################################################
-# Função para fazer imprimir conteúdo quando o Test Mode está activo							#
+# Funcao para fazer imprimir conteudo quando o Test Mode está activo							#
 #################################################################################################
 
 def printMessages(message):
