@@ -12,8 +12,8 @@ from Crypto.PublicKey import RSA
 
 # Sender Variables
 SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
-SOURCE_PORT = 5006
-DESTINATION_PORT = 5007
+SOURCE_PORT = 5005
+DESTINATION_PORT = 5005
 DESTINATION_ADDRESS = 'ff02::0'
 TIMOUT_TABLE = 20
 TIMOUT_BUFFER = 20
@@ -216,6 +216,23 @@ def getDistance(oldCoordinates, newCoordinates):
 
 
 #################################################################################################
+# Function for set security field in message													#
+#################################################################################################
+
+def setSecurity(payload):
+
+	global security
+	
+	with open('moto.key') as f: key_text = f.read()
+	key = RSA.importKey(key_text)
+	f.close()
+	hash = MD5.new(json.dumps(payload).encode('utf-8')).digest()
+
+	security['signature'] = key.sign(hash, '')
+	return
+
+
+#################################################################################################
 # Function for finding the nearest node to destination											#
 #################################################################################################
 
@@ -378,11 +395,16 @@ def getCurrentPosition():
 	serialLine = serialPort.readline().decode('utf-8').split(",")
 
 	if(serialLine[0] == "$GPGGA" ):
-		latitude, longitude = convertDMStoDD(serialLine[2], serialLine[3], serialLine[4], serialLine[5])
-		coordinates = [latitude, longitude]
-		detectionTime = time.time()	
+		try:
+			latitude, longitude = convertDMStoDD(serialLine[2], serialLine[3], serialLine[4], serialLine[5])
+			coordinates = [latitude, longitude]
+			detectionTime = time.time()	
+		except (OSError, IOError, ValueError) as e:
+			print("\nUps.. Problems with GPS!")
+			return getCurrentPosition()
+		
 		return coordinates, detectionTime
-	
+
 	else:
 		return getCurrentPosition()
 
@@ -565,7 +587,7 @@ def degreesToDecimal(value):
 #####################################################################################
 if __name__ == "__main__":
 
-	while True:
+	'''while True:
 
 		number = input("Choose a number for coordinate file (between 1 and 5) or \"Exit\" to exit the program: ")
 		if number == "Exit":
@@ -575,12 +597,12 @@ if __name__ == "__main__":
 		    fileCoordinates = open("./Coordinates/Coordinate" + number + ".txt")
 		    break
 		except (OSError, IOError) as e:
-			print("\nYou must choose a number between 1 and 5")
+			print("\nYou must choose a number between 1 and 5")'''
 
 	_thread.start_new_thread(inputMessages,())
 
-	COORDINATES = fileCoordinates.readlines()
-	COORDINATES_INDEX = len(COORDINATES) - 1
+	'''COORDINATES = fileCoordinates.readlines()
+	COORDINATES_INDEX = len(COORDINATES) - 1'''
 
 	_thread.start_new_thread(sendMessages,())
 	_thread.start_new_thread(receiveMessages,())
@@ -589,5 +611,4 @@ if __name__ == "__main__":
 		pass
 
 	sys.exit()
-
 

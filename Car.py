@@ -13,7 +13,7 @@ from Crypto.PublicKey import RSA
 # Sender Variables
 SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
 SOURCE_PORT = 5005
-DESTINATION_PORT = 5006
+DESTINATION_PORT = 5005
 DESTINATION_ADDRESS = 'ff02::0'
 TIMOUT_TABLE = 20
 TIMOUT_BUFFER = 20
@@ -33,6 +33,13 @@ beaconBody = {
 	'stationPosition': None,										# Station Position
 	'stationPositionTime': None,									# Sation Position Time
 }
+messageBodyUnicast = {
+	'nextDestinationMAC': None,
+	'finalDestinationMAC': 0,
+	'finalDestinationPosition': None,
+	'eventPosition': None,											# Motorcycle's Position
+	'eventTime': None,												# Time at event was gathered
+}
 security = { 'signature': None }
 
 
@@ -42,6 +49,7 @@ table = []
 nodeBuffer = []
 tableMutex = threading.Lock()
 bufferMutex = threading.Lock()
+motorcycleCoordinates = []
 
 
 
@@ -96,6 +104,7 @@ def sendMessages():
 def receiveMessages():
 
 	global messageHeader
+	global motorcycleCoordinates
 
 	receiverSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
 	groupBin = socket.inet_pton(socket.AF_INET6, 'ff02::0')
@@ -130,26 +139,25 @@ def receiveMessages():
 				regionOfInterest = messageReceivedBody['regionOfInterest']
 				eventPosition = messageReceivedBody['eventPosition']
 				
-#				# Time not expired neither region of interest passed
-#				if not (timeExpired(expiryTime, eventTime) and \
-#					distancePassed(regionOfInterest, eventPosition, currentPosition)):
-#				
-#					toTransmit = retransmitMessage(regionOfInterest, eventPosition, currentPosition)
-#					# Table is empty, append message in buffer
-#					if toTransmit == None:
-#						appendBuffer(protocolType, messageReceivedBody, messageReceivedSecurity)
-#					# There are neighbours and random value is below probability - transmit
-#					elif toTransmit != None and toTransmit <= random.randint(0,100):
-#						messageHeader['protocolType'] = 1
-#				 		setSecurity(messageBodyDEN)
-#						message = [messageHeader, messageBodyDEN, security]
-#						send(message, DESTINATION_ADDRESS)
+				# Time not expired neither region of interest passed
+				if not (timeExpired(expiryTime, eventTime) and \
+					distancePassed(regionOfInterest, eventPosition, currentPosition)):
+				
+					toTransmit = retransmitMessage(regionOfInterest, eventPosition, currentPosition)
+					# Table is empty, append message in buffer
+					if toTransmit == None:
+						appendBuffer(protocolType, messageReceivedBody, messageReceivedSecurity)
+					# There are neighbours and random value is below probability - transmit
+					elif toTransmit != None and toTransmit <= random.randint(0,100):
+						messageHeader['protocolType'] = 1
+						message = [messageHeader, messageReceivedBody, messageReceivedSecurity]
+						send(message, DESTINATION_ADDRESS)
 
 #################################################################################################
-				if True:
+				'''if True:
 					messageHeader['protocolType'] = 1
 					message = [messageHeader, messageReceivedBody, messageReceivedSecurity]
-					send(message, 'ff02::0')
+					send(message, 'ff02::0')'''
 #################################################################################################
 
 			elif protocolType == 3:
@@ -172,6 +180,7 @@ def receiveMessages():
 					messageReceivedBody['nextDestinationMAC'] == messageReceivedBody['finalDestinationPosition']:
 					print("Mota Roubada!!!!! Posição - " + str(messageReceivedBody['eventPosition']) + \
 						" | Tempo - " + str(messageReceivedBody['eventTime']))
+					motorcycleCoordinates = messageReceivedBody['eventPosition']
 				# Nears Node is actual node
 				else:
 					appendBuffer(protocolType, messageReceivedBody, None)
@@ -257,6 +266,22 @@ def nearestNode(destinationPosition):
 
 
 #################################################################################################
+# Function for set security field in message													#
+#################################################################################################
+
+def setSecurity(payload):
+
+	global security
+	
+	with open('moto.key') as f: key_text = f.read()
+	key = RSA.importKey(key_text)
+	f.close()
+	hash = MD5.new(json.dumps(payload).encode('utf-8')).digest()
+
+	security['signature'] = key.sign(hash, '')
+	return
+
+#################################################################################################
 # Function to verify if new message is new 														#
 #################################################################################################
 
@@ -310,6 +335,7 @@ def appendBuffer(protocolType, messageBody, security):
 	global nodeBuffer
 	global bufferMutex
 	
+	print("||||||||||||||||||| ENTROU BUFFER |||||||||||||||||||")
 	bufferMutex.acquire()
 
 	eventTime = messageBody['eventTime']
@@ -444,8 +470,8 @@ def updateTimerThread(isBuffer):
 					expiryTime = message.messageBody['expiryTime']
 					regionOfInterest = message.messageBody['regionOfInterest']
 					eventPosition = message.messageBody['eventPosition']
-					if message.timer == TIMOUT_BUFFER or timeExpired(expiryTime, message.eventTime):# or \
-#						distancePassed(regionOfInterest, eventPosition, getCurrentPosition()[0])):
+					if message.timer == TIMOUT_BUFFER or timeExpired(expiryTime, message.eventTime) or \
+						distancePassed(regionOfInterest, eventPosition, getCurrentPosition()[0]):
 						del nodeBuffer[index]				
 					else:
 						message.timer += 1
@@ -512,11 +538,16 @@ def getCurrentPosition():
 	serialLine = serialPort.readline().decode('utf-8').split(",")
 
 	if(serialLine[0] == "$GPGGA" ):
-		latitude, longitude = convertDMStoDD(serialLine[2], serialLine[3], serialLine[4], serialLine[5])
-		coordinates = [latitude, longitude]
-		detectionTime = time.time()	
+		try:
+			latitude, longitude = convertDMStoDD(serialLine[2], serialLine[3], serialLine[4], serialLine[5])
+			coordinates = [latitude, longitude]
+			detectionTime = time.time()	
+		except (OSError, IOError, ValueError) as e:
+			print("\nUps.. Problems with GPS!")
+			return getCurrentPosition()
+		
 		return coordinates, detectionTime
-	
+
 	else:
 		return getCurrentPosition()
 
@@ -533,10 +564,38 @@ def inputMessages():
 	print("\nFor exit, type \"Exit\".")
 	print("For test mode type \"Test\".")
 	print("For normal mode type \"Normal\".\n")
-	
-	while True:
-		INPUT_MESSAGE = input()
+	print("To turn off Alarm mode type \"Off\".\n")
 
+	while True:
+		userInput = input()
+		if userInput == "Off":
+			turnOffMotorcycle()
+		else:
+			INPUT_MESSAGE = userInput
+
+def turnOffMotorcycle():
+
+	global messageHeader
+	global messageBodyUnicast
+	global motorcycleCoordinates
+
+	
+	messageBodyUnicast['nextDestinationMAC'] = nearestNode(motorcycleCoordinates)
+
+	if messageBodyUnicast['nextDestinationMAC'] != messageHeader['stationID'] and \
+		messageBodyUnicast['nextDestinationMAC'] != motorcycleCoordinates:
+		setSecurity(messageBodyUnicast)
+		message = [protocolType, messageReceivedBody, security]
+		send(message, DESTINATION_ADDRESS)
+	# Nearst Node is destination
+	elif messageBodyUnicast['nextDestinationMAC'] != messageHeader['stationID'] and \
+		messageBodyUnicast['nextDestinationMAC'] == motorcycleCoordinates:
+		setSecurity(messageBodyUnicast)
+		message = [protocolType, messageReceivedBody, security]
+		send(message, DESTINATION_ADDRESS)
+	# Nearst Node is the owner
+	else:
+		appendBuffer(3, messageBodyUnicast, None)
 
 
 #################################################################################################
@@ -585,7 +644,7 @@ def degreesToDecimal(value):
 #####################################################################################
 if __name__ == "__main__":
 
-	while True:
+	'''while True:
 
 		number = input("Choose a number for coordinate file (between 1 and 5) or \"Exit\" to exit the program: ")
 		if number == "Exit":
@@ -595,12 +654,12 @@ if __name__ == "__main__":
 		    fileCoordinates = open("./Coordinates/Coordinate" + number + ".txt")
 		    break
 		except (OSError, IOError) as e:
-			print("\nYou must choose a number between 1 and 5")
+			print("\nYou must choose a number between 1 and 5")'''
 
 	_thread.start_new_thread(inputMessages,())
 
-	COORDINATES = fileCoordinates.readlines()
-	COORDINATES_INDEX = len(COORDINATES) - 1
+	'''COORDINATES = fileCoordinates.readlines()
+	COORDINATES_INDEX = len(COORDINATES) - 1'''
 
 	_thread.start_new_thread(sendMessages,())
 	_thread.start_new_thread(receiveMessages,())
@@ -609,4 +668,3 @@ if __name__ == "__main__":
 		pass
 
 	sys.exit()
-

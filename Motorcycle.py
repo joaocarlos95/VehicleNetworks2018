@@ -12,7 +12,7 @@ from Crypto.PublicKey import RSA
 
 # Sender Variables
 SCOPEID = 8															# scopeID in the end of the line where IPv6 address is
-SOURCE_PORT = 5004
+SOURCE_PORT = 5005
 DESTINATION_PORT = 5005
 DESTINATION_ADDRESS = 'ff02::0'
 TIMOUT_TABLE = 20
@@ -49,8 +49,8 @@ messageBodyDEN = {
 }
 messageBodyUnicast = {
 	'nextDestinationMAC': None,
-	'finalDestinationMAC': 4,
-	'finalDestinationPosition': [1, 2],
+	'finalDestinationMAC': 1,
+	'finalDestinationPosition': [38.740811111111114, -9.304983333333334],
 	'eventPosition': None,											# Motorcycle's Position
 	'eventTime': None,												# Time at event was gathered
 }
@@ -264,11 +264,16 @@ def getCurrentPosition():
 	serialLine = serialPort.readline().decode('utf-8').split(",")
 
 	if(serialLine[0] == "$GPGGA" ):
-		latitude, longitude = convertDMStoDD(serialLine[2], serialLine[3], serialLine[4], serialLine[5])
-		coordinates = [latitude, longitude]
-		detectionTime = time.time()	
+		try:
+			latitude, longitude = convertDMStoDD(serialLine[2], serialLine[3], serialLine[4], serialLine[5])
+			coordinates = [latitude, longitude]
+			detectionTime = time.time()	
+		except (OSError, IOError, ValueError) as e:
+			print("\nUps.. Problems with GPS!")
+			return getCurrentPosition()
+		
 		return coordinates, detectionTime
-	
+
 	else:
 		return getCurrentPosition()
 
@@ -499,7 +504,6 @@ def printMessages(message):
 
 def convertDMStoDD(latitude, YY, longitude, XX):
 	
-	print(latitude, YY, longitude, XX)
 	latitude = degreesToDecimal(float(latitude))
 	if YY == 'S':
 		latitude *= -1
@@ -529,22 +533,22 @@ def degreesToDecimal(value):
 #####################################################################################
 if __name__ == "__main__":
 
-	while True:
+	'''while True:
 
 		number = input("Choose a number for coordinate file (between 1 and 5) or \"Exit\" to exit the program: ")
 		if number == "Exit":
 			sys.exit()
-
+		
 		try:
 		    fileCoordinates = open("./Coordinates/Coordinate" + number + ".txt")
 		    break
 		except (OSError, IOError) as e:
-			print("\nYou must choose a number between 1 and 5")
+			print("\nYou must choose a number between 1 and 5")'''
 
 	_thread.start_new_thread(inputMessages,())
 
-	COORDINATES = fileCoordinates.readlines()
-	COORDINATES_INDEX = len(COORDINATES) - 1
+	'''COORDINATES = fileCoordinates.readlines()
+	COORDINATES_INDEX = len(COORDINATES) - 1'''
 
 	_thread.start_new_thread(sendMessages,(False,))
 	_thread.start_new_thread(receiveMessages,())
