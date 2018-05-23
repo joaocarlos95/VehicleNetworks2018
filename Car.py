@@ -1,14 +1,14 @@
 
-import socket
-import struct
-import datetime, time
+import sys, socket, struct
+import datetime, time, random
 import _thread, threading
-import sys
-import hashlib
+import Crypto.Hash.MD5 as MD5
 import json
-import random
+
 from uuid import getnode
-from math import sin, cos, sqrt, atan2, radians
+from math import sin, cos, sqrt, atan2, radians, degrees
+from Crypto.PublicKey import RSA
+
 
 # Sender Variables
 SCOPEID = 8 														# scopeID in the end of the line where IPv6 address is
@@ -22,19 +22,19 @@ TIMOUT_BUFFER = 20
 COORDINATES = None
 COORDINATES_INDEX = 0
 INPUT_MESSAGE = None
-TIME_SENT_MESSAGES = 5												# Time between sent messages
 
 messageHeader = {
-	'protocolType': None,											# 0 = Beacon | 1 = DEN | 2 = CA
+	'protocolType': None,											# 0 = Beacon | 1 = DEN | 2 = CA | 3 = Unicast
 	'stationID': 1,													# Station ID
 	# 'stationID': hex(getnode()),									# MAC Address
 	'messageID': 0, 												# Message ID
 }
-
 beaconBody = {
 	'stationPosition': None,										# Station Position
 	'stationPositionTime': None,									# Sation Position Time
 }
+security = { 'signature': None }
+
 
 table = []
 nodeBuffer = []
@@ -44,7 +44,6 @@ bufferMutex = threading.Lock()
 
 
 class Station:
-
 	def __init__(self, stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer):
 		self.stationID = stationID
 		self.messageID = messageID
@@ -53,10 +52,12 @@ class Station:
 		self.isNeighbour = isNeighbour
 		self.timer = timer
 
-class MessageBuffer:
-	
-	def __init__(protocolType, messageBody, security, timer):
+
+class MessageBuffer:	
+	def __init__(self, stationID, eventTime, protocolType, messageBody, security, timer):
 		self.protocolType = protocolType
+		self.stationID = stationID
+		self.eventTime = eventTime
 		self.messageBody = messageBody
 		self.security = security
 		self.timer = timer
@@ -67,13 +68,10 @@ class MessageBuffer:
 # Function to send messages to all nodes in range												#
 #################################################################################################
 
-def sendFunction():
+def sendMessages():
 
 	global messageHeader
 	global beaconBody
-	global messageBodyDEN
-
-	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
 
 	while COORDINATES_INDEX >= 0:
 
@@ -83,52 +81,140 @@ def sendFunction():
 		beaconBody['stationPosition'] = stationPosition
 		beaconBody['stationPositionTime'] = stationPositionTime
 		message = [messageHeader, beaconBody, None]
+		send(message, DESTINATION_ADDRESS)
 
-		messageEncoded = json.dumps(message).encode('utf-8')
-
-		printMessages("\n++++++++++++++++++++")
-		printMessages("Sending message [" + str(message) + "] to " + DESTINATION_ADDRESS)
-
-		senderSocket.sendto(messageEncoded, (DESTINATION_ADDRESS, DESTINATION_PORT, 0, SCOPEID))
-
-		messageHeader['messageID'] += 1
-		time.sleep(5)
-		#time.sleep(500 / 1000) 
-		#time.sleep((500 + random.randint(0, 100)) / 1000) 
-		
+		time.sleep(500 / 100) 
 	return
 
 
+#################################################################################################
+# Function to receive messages from all nodes in range											#
+#################################################################################################
+			
+def receiveMessages():
+
+	global messageHeader
+
+	receiverSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+	groupBin = socket.inet_pton(socket.AF_INET6, 'ff02::0')
+	mReq = groupBin + struct.pack('@I', SCOPEID)
+	receiverSocket.bind(('', SOURCE_PORT))
+	receiverSocket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mReq)
+
+	while True:
+		
+		message, payload = receiverSocket.recvfrom(2048)
+	
+		messageReceivedHeader, messageReceivedBody, messageReceivedSecurity = json.loads(message.decode('utf-8'))
+
+		protocolType = messageReceivedHeader['protocolType']
+		stationID = messageReceivedHeader['stationID']
+		messageID = messageReceivedHeader['messageID']
+
+		if (isNewMessage(stationID, messageID) and messageHeader['stationID'] != stationID):
+			
+			printMessages("\n--------------------")
+			printMessages("Message Received from " + str(payload[0].split("%")[0]))
+			printMessages("Message: " + str(json.loads(message.decode('utf-8'))))
+	
+			if protocolType == 0:
+				updateTable(stationID, messageID, messageReceivedBody, 1, 0)
+		
+			elif protocolType == 1:
+				currentPosition, newDetectionTime = getCurrentPosition()
+				
+				expiryTime = messageReceivedBody['expiryTime']
+				eventTime = messageReceivedBody['eventTime']
+				regionOfInterest = messageReceivedBody['regionOfInterest']
+				eventPosition = messageReceivedBody['eventPosition']
+				
+#				# Time not expired neither region of interest passed
+#				if not (timeExpired(expiryTime, eventTime) and \
+#					distancePassed(regionOfInterest, eventPosition, currentPosition)):
+#				
+#					toTransmit = retransmitMessage(regionOfInterest, eventPosition, currentPosition)
+#					# Table is empty, append message in buffer
+#					if toTransmit == None:
+#						appendBuffer(protocolType, messageReceivedBody, messageReceivedSecurity)
+#					# There are neighbours and random value is below probability - transmit
+#					elif toTransmit != None and toTransmit <= random.randint(0,100):
+#						messageHeader['protocolType'] = 1
+#				 		setSecurity(messageBodyDEN)
+#						message = [messageHeader, messageBodyDEN, security]
+#						send(message, DESTINATION_ADDRESS)
 
 #################################################################################################
-# Function for forwarding messages 																#
+				if True:
+					messageHeader['protocolType'] = 1
+					message = [messageHeader, messageReceivedBody, messageReceivedSecurity]
+					send(message, 'ff02::0')
 #################################################################################################
 
-def forwardMessage(message, destinationAddress):
+			elif protocolType == 3:
+				# Find nearest Node to destination
+				messageReceivedBody['nextDestinationMAC'] = nearestNode(messageReceivedBody['finalDestinationPosition'])
+				# Nearest Node is someone between destination and actual node
+				if messageReceivedBody['nextDestinationMAC'] != messageHeader['stationID'] and \
+					messageReceivedBody['nextDestinationMAC'] != messageReceivedBody['finalDestinationPosition']:
+					setSecurity(messageReceivedBody)
+					message = [protocolType, messageReceivedBody, security]
+					send(message, DESTINATION_ADDRESS)
+				# Nearst Node is destination
+				elif messageReceivedBody['nextDestinationMAC'] != messageHeader['stationID'] and \
+					messageReceivedBody['nextDestinationMAC'] == messageReceivedBody['finalDestinationPosition']:
+					setSecurity(messageReceivedBody)
+					message = [protocolType, messageReceivedBody, security]
+					send(message, DESTINATION_ADDRESS)
+				# Nearst Node is the owner
+				elif messageReceivedBody['nextDestinationMAC'] == messageHeader['stationID'] and \
+					messageReceivedBody['nextDestinationMAC'] == messageReceivedBody['finalDestinationPosition']:
+					print("Mota Roubada!!!!! Posição - " + str(messageReceivedBody['eventPosition']) + \
+						" | Tempo - " + str(messageReceivedBody['eventTime']))
+				# Nears Node is actual node
+				else:
+					appendBuffer(protocolType, messageReceivedBody, None)
+	return
+
+
+#################################################################################################
+# Function for sending messages 																#
+#################################################################################################
+
+def send(message, destination):
 
 	global messageHeader
 
 	senderSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-
+	
 	messageEncoded = json.dumps(message).encode('utf-8')
-
+	
 	printMessages("\n++++++++++++++++++++")
-	printMessages("Forwarding message [" + str(message) + "] to " + destinationAddress)
-	senderSocket.sendto(messageEncoded, (destinationAddress, DESTINATION_PORT, 0, SCOPEID))
+	printMessages("Sending message [" + str(message) + "] to " + destination)
 
+	senderSocket.sendto(messageEncoded, (destination, DESTINATION_PORT, 0, SCOPEID))
 	messageHeader['messageID'] += 1
 	return
 
 
-def timeExpired(expiryTime, positionTime):
+#################################################################################################
+# Function to verify if message's time is expired												#
+#################################################################################################
 
+def timeExpired(expiryTime, positionTime):
 	return expiryTime + positionTime > time.time()
 
 
-def distancePassed(regionOfInterest, eventPosition, currentPosition):
+#################################################################################################
+# Function to verify if message's limit distance has reached									#
+#################################################################################################
 
+def distancePassed(regionOfInterest, eventPosition, currentPosition):
 	return regionOfInterest < getDistance(eventPosition, currentPosition)
 
+
+#################################################################################################
+# Function for getting the direction of two nodes 												#
+#################################################################################################
 
 def getDistance(oldCoordinates, newCoordinates):
 
@@ -148,107 +234,74 @@ def getDistance(oldCoordinates, newCoordinates):
 	return abs(radius * y)
 
 
+#################################################################################################
+# Function for finding the nearest node to destination											#
+#################################################################################################
+
+def nearestNode(destinationPosition):
+
+	node = messageHeader['stationID']
+	distanceToDestination = getDistance(getCurrentPosition()[0], destinationPosition)
+	
+	for entry in table:
+		distance = getDistance(entry.stationPosition, destinationPosition)
+		if distanceToDestination == None:
+			node = entry.stationID
+			distanceToDestination = distance
+		elif distanceToDestination > distance:
+			node = entry.stationID
+			distanceToDestination = distance
+	return node
+
 
 #################################################################################################
-# Função para receber mensagens de qualquer nó da rede (Receiver)								#
+# Function to verify if new message is new 														#
 #################################################################################################
-
-def receiveFunction():
-
-	global messageHeader
-
-	receiverSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-
-	groupBin = socket.inet_pton(socket.AF_INET6, 'ff02::0')
-	mReq = groupBin + struct.pack('@I', SCOPEID)
-
-	receiverSocket.bind(('', SOURCE_PORT))
-	receiverSocket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP, mReq)
-
-	while True:
-		message, payload = receiverSocket.recvfrom(2048)
-		
-		try:
-			messageDecoded = json.loads(message.decode('utf-8'))
-		except (OSError, IOError) as e:
-			print("\nError in decoding message.. =(")
-
-		messageReceivedHeader = messageDecoded[0]
-		messageReceivedBody = messageDecoded[1]
-		messageSecurity = messageDecoded[2]
-
-		stationID = messageReceivedHeader['stationID']
-		messageID = messageReceivedHeader['messageID']
-
-		printMessages("\n--------------------")
-		printMessages("Message Received from " + str(payload[0].split("%")[0]))
-		printMessages("Message: " + str(messageDecoded))
-
-		if (isNewMessage(stationID, messageID) and messageHeader['stationID'] != stationID):
-			
-			if messageReceivedHeader['protocolType'] == 0:
-				stationPosition = messageReceivedBody['stationPosition']
-				stationPositionTime = messageReceivedBody['stationPositionTime']
-				updateTable(stationID, messageID, stationPosition, stationPositionTime, 1, 0)
-		
-			elif messageReceivedHeader['protocolType'] == 1:
-
-				expiryTime = messageReceivedBody['expiryTime']
-				eventTime = messageReceivedBody['eventTime']
-				regionOfInterest = messageReceivedBody['regionOfInterest']
-				eventPosition = messageReceivedBody['eventPosition']
-
-				if True:
-					messageHeader['protocolType'] = 1
-					message = [messageHeader, messageReceivedBody, messageSecurity]
-					forwardMessage(message, 'ff02::0')
-
-				#currentPosition, newDetectionTime = getCurrentPosition()
-			
-				#if not(timeExpired(expiryTime, eventTime) and 
-				#	distancePassed(regionOfInterest, eventPosition, currentPosition)):
-				#	toTransmit = retransmitProbability(regionOfInterest, eventPosition, currentPosition, protocolType, messageBody, security)
-				#	if toTransmit != None and toTransmit <= random.randint(0,100):
-				#
-				#		messageHeader['protocolType'] = 1
-				#		message = [messageHeader, messageReceivedBody]
-				#		forwardMessage(message, 'ff02::0')
-
 
 def isNewMessage(stationID, messageID):
 
 	index = findNode(stationID)
-
 	if index != None and table[index].messageID >= messageID:
 		return False
-
 	return True
 
+
+#################################################################################################
+# Function to find a node in table 																#
+#################################################################################################
 
 def findNode(stationID):
 
 	global table
 
-	i = 0
+	index = 0
 	for entry in table:
 		if entry.stationID == stationID:
-			return i
-		i += 1
+			return index
+		index += 1
 	return None
 
 
-def retransmitProbability(regionOfInterest, eventPosition, currentPosition, protocolType, messageBody, security):
+#################################################################################################
+# Function to retransmit a message 																#
+#################################################################################################
+
+def retransmitMessage(regionOfInterest, eventPosition, currentPosition):
+
+	global table
 
 	sizeTable = len(table)
-
 	if sizeTable == 0:
-		appendBuffer(protocolType, messageBody, security)
 		return None
 	else:
 		x = 100 / sizeTable
 		distanceEvent = getDistance(eventPosition, currentPosition)
 		return (distanceEvent / regionOfInterest) * x
 
+
+#################################################################################################
+# Function to append a message in the buffer													#
+#################################################################################################
 
 def appendBuffer(protocolType, messageBody, security):
 
@@ -257,45 +310,52 @@ def appendBuffer(protocolType, messageBody, security):
 	
 	bufferMutex.acquire()
 
+	eventTime = messageBody['eventTime']
+	if protocolType == 1:
+		stationID = messageBody['actionID'][0]
+	elif protocolType == 3:
+		stationID = messageBody['finalDestinationMAC']
+	
+	# Buffer empty
 	if not nodeBuffer:
-		messageBuffer = MessageBuffer(protocolType, messageBodyDEN, security, 0)
+		messageBuffer = MessageBuffer(stationID, eventTime, protocolType, messageBody, security, 0)
 		nodeBuffer.append(messageBuffer)
 		_thread.start_new_thread(updateTimerThread,(True,))
 		bufferMutex.release()
 		return
-
-	index = findInBuffer(messageBody['actionID'][0])
-	if index == None:
-		messageBuffer = MessageBuffer(protocolType, messageBodyDEN, security, 0)
-		nodeBuffer.append(messageBuffer)
-
-	elif updateBuffer(index, protocolType, messageBody):
-		del nodeBuffer[index]
-		messageBuffer = MessageBuffer(protocolType, messageBodyDEN, security, 0)
-		nodeBuffer.append(messageBuffer)			
-
+	# Buffer has something
+	else:
+		index = findInBuffer(protocolType, eventTime)
+		# Message isn't in buffer
+		if index == None:
+			messageBuffer = MessageBuffer(stationID, eventTime, protocolType, messageBody, security, 0)
+			nodeBuffer.append(messageBuffer)
+		# Message is in buffer and new message is newer
+		elif eventTime > nodeBuffer[index].eventTime:
+			del nodeBuffer[index]
+			messageBuffer = MessageBuffer(stationID, eventTime, protocolType, messageBody, security, 0)
+			nodeBuffer.append(messageBuffer)
+	
 	bufferMutex.release()
+	return
 
 
-def findInBuffer(stationID):
+#################################################################################################
+# Function to find message by station ID in buffer												#
+#################################################################################################
+
+def findInBuffer(protocolType, stationID):
 
 	index = 0
 	for message in nodeBuffer:
-		if message.stationID == stationID:
+		if message.stationID == stationID and message.protocolType == protocolType:
 			return index
 		index += 1
 	return None
 
-
-def updateBuffer(index, protocolType, messageBody):
-
-	if protocolType == 1:
-
-		eventTimeBuffer = nodeBuffer[index].messageBody['eventTime']
-		eventTime = messageBody['eventTime']
-
-		return eventTime > eventTimeBuffer
-
+#################################################################################################
+# Function to dispatch all messages in buffer													#
+#################################################################################################
 
 def dispatchBuffer():
 
@@ -303,31 +363,43 @@ def dispatchBuffer():
 	global messageHeader
 
 	while len(nodeBuffer) != 0:
-		for entry in nodeBuffer:
-
-			expiryTime = entry.messageBody['expiryTime']
-			positionTime = entry.messageBody['positionTime']
-			
-			if not(timeExpired(expiryTime, eventTime)):
-				messageHeader['protocolType'] = entry.protocolType
-				messageBody = entry.messageBody
-				security = entry.security
-				message = [messageHeader, messageBody, security]
-				forwardMessage(message, 'ff02::0')
-
+		for message in nodeBuffer:
+			if message.protocolType == 1:
+				message = [message.protocolType, message.messageBody, message.security]
+				send(message, DESTINATION_ADDRESS)
+			elif message.protocolType == 3:
+				# Find nearest Node to destination
+				message.messageBody['nextDestinationMAC'] = nearestNode(message.messageBody['finalDestinationPosition'])
+				# Nearest Node is someone between destination and actual node
+				if message.messageBody['nextDestinationMAC'] != messageHeader['stationID'] and \
+					message.messageBody['nextDestinationMAC'] != message.messageBody['finalDestinationPosition']:
+					setSecurity(message.messageBody)
+					message = [message.protocolType, message.messageBody, security]
+					send(message, DESTINATION_ADDRESS)
+				# Nearst Node is destination
+				elif message.messageBody['nextDestinationMAC'] != messageHeader['stationID'] and \
+					message.messageBody['nextDestinationMAC'] == message.messageBody['finalDestinationPosition']:
+					setSecurity(message.messageBody)
+					message = [message.protocolType, message.messageBody, security]
+					send(message, DESTINATION_ADDRESS)
+	return
 
 
 #################################################################################################
 # Function to update Neighbor table																#
 #################################################################################################
 
-def updateTable(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer):
+def updateTable(stationID, messageID, messageReceivedBody, isNeighbour, timer):
 
 	global table
 	global tableMutex
 
+	stationPosition = messageReceivedBody['stationPosition']
+	stationPositionTime = messageReceivedBody['stationPositionTime']
+
 	tableMutex.acquire()
 
+	# Table is empty - Add node
 	if not table:
 		station = Station(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer)
 		table.append(station)
@@ -336,10 +408,12 @@ def updateTable(stationID, messageID, stationPosition, stationPositionTime, isNe
 		dispatchBuffer()
 		return		
 
+	# Table has nodes - Find node or add new one
 	i = findNode(stationID)
 	if i == None:
 		station = Station(stationID, messageID, stationPosition, stationPositionTime, isNeighbour, timer)
 		table.append(station)
+		dispatchBuffer()
 	else:
 		table[i].messageID = messageID
 		table[i].stationPosition = stationPosition
@@ -348,7 +422,7 @@ def updateTable(stationID, messageID, stationPosition, stationPositionTime, isNe
 		table[i].timer = timer
 
 	tableMutex.release()
-
+	return
 
 
 #################################################################################################
@@ -363,14 +437,22 @@ def updateTimerThread(isBuffer):
 	if isBuffer:
 		while len(nodeBuffer) != 0:
 			index = 0
-			for entry in nodeBuffer:
-				expiryTime = entry.messageBody['expiryTime']
-				positionTime = entry.messageBody['positionTime']
+			for message in nodeBuffer:
+				if message.protocolType == 1:
+					expiryTime = message.messageBody['expiryTime']
+					regionOfInterest = message.messageBody['regionOfInterest']
+					eventPosition = message.messageBody['eventPosition']
+					if message.timer == TIMOUT_BUFFER or timeExpired(expiryTime, message.eventTime):# or \
+#						distancePassed(regionOfInterest, eventPosition, getCurrentPosition()[0])):
+						del nodeBuffer[index]				
+					else:
+						message.timer += 1
 				
-				if entry.timer == TIMOUT_BUFFER or timeExpired(expiryTime, positionTime):
-					del nodeBuffer[index]				
-				else:
-					entry.timer += 1
+				elif message.protocolType == 3:
+					if message.timer == TIMOUT_BUFFER:
+						del nodeBuffer[index]				
+					else:
+						message.timer += 1
 				index += 1
 			time.sleep(1)
 
@@ -386,7 +468,7 @@ def updateTimerThread(isBuffer):
 					printTable()
 				index += 1
 			time.sleep(1)
-
+	return
 
 
 #################################################################################################
@@ -398,13 +480,12 @@ def printTable():
 	global table
 
 	if INPUT_MESSAGE == "Test":
-
 		print("\nTable:")
 		for entry in table:
 			stationPositionTime = datetime.datetime.fromtimestamp(entry.stationPositionTime).strftime('%H:%M:%S')
 			print("[ " + str(entry.stationID) + " | " + str(entry.messageID) + " | " + str(entry.stationPosition) + " | " + 
 				str(stationPositionTime) + " | " + str(entry.timer) + " ]\n")
-
+	return
 
 
 #################################################################################################
@@ -451,7 +532,7 @@ def printMessages(message):
 
 	if INPUT_MESSAGE == "Test":
 		print(message)
-
+	return
 
 
 #####################################################################################
@@ -476,8 +557,8 @@ if __name__ == "__main__":
 	COORDINATES = fileCoordinates.readlines()
 	COORDINATES_INDEX = len(COORDINATES) - 1
 
-	_thread.start_new_thread(sendFunction,())
-	_thread.start_new_thread(receiveFunction,())
+	_thread.start_new_thread(sendMessages,())
+	_thread.start_new_thread(receiveMessages,())
 	
 	while INPUT_MESSAGE != "Exit":
 		pass
