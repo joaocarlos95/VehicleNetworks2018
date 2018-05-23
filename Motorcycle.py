@@ -3,7 +3,7 @@ import sys, socket, struct
 import datetime, time
 import _thread, threading
 import Crypto.Hash.MD5 as MD5
-import json
+import json, serial
 
 from uuid import getnode
 from math import sin, cos, sqrt, atan2, radians, degrees
@@ -57,6 +57,8 @@ messageBodyUnicast = {
 security = { 'signature': None }
 
 
+global serialPort 
+serialPort = serial.Serial('/dev/tty.HOLUX_M-1200E-SPPslave')
 table = []
 tableMutex = threading.Lock()
 
@@ -244,7 +246,7 @@ def updateNodeParameters():
 # Function for getting the current position of the node 										#
 #################################################################################################
 
-def getCurrentPosition():
+def getCurrentPositionList():
 
 	global COORDINATES_INDEX
 	
@@ -256,6 +258,19 @@ def getCurrentPosition():
 	COORDINATES_INDEX -= 1
 
 	return coordinates, detectionTime
+
+def getCurrentPosition():
+
+	serialLine = serialPort.readline().decode('utf-8').split(",")
+
+	if(serialLine[0] == "$GPGGA" ):
+		latitude, longitude = convertDMStoDD(serialLine[2], serialLine[3], serialLine[4], serialLine[5])
+		coordinates = [latitude, longitude]
+		detectionTime = time.time()	
+		return coordinates, detectionTime
+	
+	else:
+		return getCurrentPosition()
 
 
 #################################################################################################
@@ -477,6 +492,37 @@ def printMessages(message):
 		print(message)
 	return
 
+
+#################################################################################################
+# GPS converter from DMS format to DD format													#
+#################################################################################################
+
+def convertDMStoDD(latitude, YY, longitude, XX):
+	
+	print(latitude, YY, longitude, XX)
+	latitude = degreesToDecimal(float(latitude))
+	if YY == 'S':
+		latitude *= -1
+	
+	longitude = degreesToDecimal(float(longitude))
+	if XX == 'W':
+		longitude *= -1
+	
+	return latitude, longitude
+
+
+#################################################################################################
+# Converte degrees to decimal 																	#
+#################################################################################################
+
+def degreesToDecimal(value):
+	
+	D = int(value/100)
+	M = int(str(value).split(".")[0][-2:])
+	S = float(str(value).split(".")[1])/100
+	
+	return D + float(M)/60 + float(S)/3600
+	
 
 #####################################################################################
 # Main																				#
