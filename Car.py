@@ -142,7 +142,7 @@ def receiveMessages():
 				# Time not expired neither region of interest passed
 				if not (timeExpired(expiryTime, eventTime) and \
 					distancePassed(regionOfInterest, eventPosition, currentPosition)):
-				
+# FOR UNICAST	if True:
 					toTransmit = retransmitMessage(regionOfInterest, eventPosition, currentPosition)
 					# Table is empty, append message in buffer
 					if toTransmit == None:
@@ -178,9 +178,19 @@ def receiveMessages():
 				# Nearst Node is the owner
 				elif messageReceivedBody['nextDestinationMAC'] == messageHeader['stationID'] and \
 					messageReceivedBody['nextDestinationMAC'] == messageReceivedBody['finalDestinationPosition']:
-					print("Mota Roubada!!!!! Posição - " + str(messageReceivedBody['eventPosition']) + \
+
+					with open('moto.key') as f1: key_text2 = f1.read()
+					key2 = RSA.importKey(key_text2)
+					f1.close()
+
+					pubkey = key2.publickey()
+					hash = MD5.new(json.dumps(messageReceivedBody).encode('utf-8')).digest()
+	
+					if pubkey.verify(hash, messageReceivedSecurity['signature']):
+
+						print("Mota Roubada!!!!! Posição - " + str(messageReceivedBody['eventPosition']) + \
 						" | Tempo - " + str(messageReceivedBody['eventTime']))
-					motorcycleCoordinates = messageReceivedBody['eventPosition']
+						motorcycleCoordinates = messageReceivedBody['eventPosition']
 				# Nears Node is actual node
 				else:
 					appendBuffer(protocolType, messageReceivedBody, None)
@@ -336,6 +346,7 @@ def appendBuffer(protocolType, messageBody, security):
 	global bufferMutex
 	
 	print("||||||||||||||||||| ENTROU BUFFER |||||||||||||||||||")
+
 	bufferMutex.acquire()
 
 	eventTime = messageBody['eventTime']
@@ -389,6 +400,9 @@ def dispatchBuffer():
 
 	global nodeBuffer
 	global messageHeader
+
+	print("||||||||||||||||||| SAIU BUFFER |||||||||||||||||||")
+
 
 	while len(nodeBuffer) != 0:
 		for message in nodeBuffer:

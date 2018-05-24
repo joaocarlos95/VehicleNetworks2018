@@ -125,6 +125,7 @@ def sendMessages(alarmActive):
 
 def receiveMessages():
 
+	global ALARM
 	global messageHeader
 
 	receiverSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
@@ -161,6 +162,23 @@ def receiveMessages():
 					setSecurity(messageReceivedBody)
 					message = [protocolType, messageReceivedBody, security]
 					send(message, DESTINATION_ADDRESS)
+
+			elif messageReceivedBody['nextDestinationMAC'] == messageHeader['stationID'] and \
+				messageReceivedBody['nextDestinationMAC'] == messageReceivedBody['finalDestinationPosition']:
+
+				with open('moto.key') as f1: key_text2 = f1.read()
+				key2 = RSA.importKey(key_text2)
+				f1.close()
+
+				pubkey = key2.publickey()
+				hash = MD5.new(json.dumps(messageReceivedBody).encode('utf-8')).digest()
+	
+				if pubkey.verify(hash, messageReceivedSecurity['signature']):
+
+					ALARM = False
+
+
+
 	return
 
 

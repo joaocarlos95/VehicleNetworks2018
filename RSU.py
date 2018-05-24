@@ -443,8 +443,6 @@ def printMessages(message):
 
 def updateDatabase(messageReceivedBody, messageSecurity):
 
-	databaseSocket = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-
 	with open('moto.key') as f1: key_text2 = f1.read()
 	key2 = RSA.importKey(key_text2)
 	f1.close()
